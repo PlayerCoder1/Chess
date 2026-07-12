@@ -52,7 +52,7 @@ import net.runelite.client.ui.PluginPanel;
  * client resizing when the online match controls become visible.
  */
 @SuppressWarnings("serial")
-public final class RuneLiteChessPanel extends PluginPanel
+public final class ChessPanel extends PluginPanel
     implements ChessGameListener, ChessMultiplayerService.Listener
 {
     private static final Integer[] MINUTES = ChessTimeControl.minuteOptions();
@@ -123,7 +123,7 @@ public final class RuneLiteChessPanel extends PluginPanel
     private ChessColor lastAutoOrientedColor;
 
     @Inject
-    public RuneLiteChessPanel(
+    public ChessPanel(
         LocalChessController controller,
         ChessMultiplayerService multiplayer,
         ChessBoardOverlay boardOverlay)

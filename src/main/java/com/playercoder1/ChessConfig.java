@@ -6,7 +6,7 @@ import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.Range;
 
 @ConfigGroup("runelitechess")
-public interface RuneLiteChessConfig extends Config
+public interface ChessConfig extends Config
 {
     @Range(min = 1, max = 180)
     @ConfigItem(

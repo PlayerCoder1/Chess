@@ -17,15 +17,15 @@ import net.runelite.client.util.ImageUtil;
 @PluginDescriptor(
     name = "Chess",
     description = "Play local or private two-player chess in the sidebar or an interactive game overlay",
-    tags = {"chess", "board", "sidebar", "overlay", "multiplayer", "party"}
+    tags = {"chess"}
 )
-public class RuneLiteChessPlugin extends Plugin
+public class ChessPlugin extends Plugin
 {
     @Inject
     private ClientToolbar clientToolbar;
 
     @Inject
-    private RuneLiteChessPanel panel;
+    private ChessPanel panel;
 
     @Inject
     private ChessBoardOverlay boardOverlay;
