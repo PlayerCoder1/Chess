@@ -8,7 +8,7 @@ import net.runelite.client.config.Range;
 @ConfigGroup("runelitechess")
 public interface ChessConfig extends Config
 {
-    @Range(min = 1, max = 180)
+    @Range(min = 1, max = 15)
     @ConfigItem(
         keyName = "initialMinutes",
         name = "Clock minutes",

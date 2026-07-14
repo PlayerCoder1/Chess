@@ -1,11 +1,13 @@
 package com.playercoder1;
 
+import com.playercoder1.chess.BotDifficulty;
+import com.playercoder1.chess.ChessBotService;
 import com.playercoder1.chess.ChessClock;
 import com.playercoder1.chess.ChessColor;
 import com.playercoder1.chess.ChessGameListener;
 import com.playercoder1.chess.ChessMultiplayerService;
-import com.playercoder1.chess.LocalChessController;
 import com.playercoder1.chess.ChessTimeControl;
+import com.playercoder1.chess.LocalChessController;
 import com.playercoder1.ui.ChessBoardOverlay;
 import com.playercoder1.ui.ChessBoardPanel;
 import java.awt.BasicStroke;
@@ -43,17 +45,10 @@ import javax.swing.plaf.basic.BasicGraphicsUtils;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 
-/**
- * Compact, scroll-safe RuneLite sidebar for local and private chess games.
- *
- * The wrapped PluginPanel constructor is intentional: it places the content in
- * RuneLite's scroll pane instead of forcing the entire client window to keep the
- * panel's full minimum height. This prevents the sidebar from blocking normal
- * client resizing when the online match controls become visible.
- */
+
 @SuppressWarnings("serial")
 public final class ChessPanel extends PluginPanel
-    implements ChessGameListener, ChessMultiplayerService.Listener
+    implements ChessGameListener, ChessMultiplayerService.Listener, ChessBotService.Listener
 {
     private static final Integer[] MINUTES = ChessTimeControl.minuteOptions();
     private static final Integer[] INCREMENTS = ChessTimeControl.incrementOptions();
@@ -81,6 +76,7 @@ public final class ChessPanel extends PluginPanel
 
     private final LocalChessController controller;
     private final ChessMultiplayerService multiplayer;
+    private final ChessBotService botService;
     private final ChessBoardPanel boardPanel;
     private final ChessBoardOverlay boardOverlay;
 
@@ -101,6 +97,7 @@ public final class ChessPanel extends PluginPanel
 
     private final JComboBox<Integer> minutesBox = new JComboBox<>(MINUTES);
     private final JComboBox<Integer> incrementBox = new JComboBox<>(INCREMENTS);
+    private final JComboBox<BotDifficulty> botDifficultyBox = new JComboBox<>(BotDifficulty.values());
     private final JTextField joinCodeField = new JTextField();
 
     private final JButton overlayButton = primaryButton("Show board");
@@ -114,18 +111,15 @@ public final class ChessPanel extends PluginPanel
     private JButton armedButton;
     private String openDrawer;
     private String lastDrawerStateKey = "";
+    private boolean listenersRegistered;
 
-    /**
-     * Color for which the board was most recently auto-oriented. Multiplayer
-     * session notifications also carry clock and connection updates, so they
-     * must not continually overwrite a player's manual board flip.
-     */
     private ChessColor lastAutoOrientedColor;
 
     @Inject
     public ChessPanel(
         LocalChessController controller,
         ChessMultiplayerService multiplayer,
+        ChessBotService botService,
         ChessBoardOverlay boardOverlay)
     {
         // Use RuneLite's wrapped/scrollable PluginPanel. super(false) makes the
@@ -134,14 +128,13 @@ public final class ChessPanel extends PluginPanel
         super();
         this.controller = controller;
         this.multiplayer = multiplayer;
+        this.botService = botService;
         this.boardOverlay = boardOverlay;
         this.boardPanel = new ChessBoardPanel(controller, multiplayer);
 
-        controller.addListener(this);
-        multiplayer.addListener(this);
-
         minutesBox.setSelectedItem(ChessTimeControl.DEFAULT_MINUTES);
         incrementBox.setSelectedItem(ChessTimeControl.DEFAULT_INCREMENT_SECONDS);
+        botDifficultyBox.setSelectedItem(BotDifficulty.GOBLIN);
 
         uiTimer = new Timer(200, event -> multiplayer.tick());
         feedbackTimer = new Timer(2600, event ->
@@ -203,7 +196,15 @@ public final class ChessPanel extends PluginPanel
 
     public void start()
     {
+        if (!listenersRegistered)
+        {
+            controller.addListener(this);
+            multiplayer.addListener(this);
+            botService.addListener(this);
+            listenersRegistered = true;
+        }
         uiTimer.start();
+        refreshUi();
     }
 
     public void stop()
@@ -212,6 +213,13 @@ public final class ChessPanel extends PluginPanel
         feedbackTimer.stop();
         cancelArmedAction();
         boardOverlay.setVisible(false);
+        if (listenersRegistered)
+        {
+            controller.removeListener(this);
+            multiplayer.removeListener(this);
+            botService.removeListener(this);
+            listenersRegistered = false;
+        }
     }
 
     private JPanel buildHeader()
@@ -352,7 +360,7 @@ public final class ChessPanel extends PluginPanel
         drawerHost.setLayout(new BorderLayout());
         drawerHost.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
         drawerHost.setVisible(false);
-        drawerHost.setMaximumSize(new Dimension(Integer.MAX_VALUE, 330));
+        drawerHost.setMaximumSize(new Dimension(Integer.MAX_VALUE, 440));
 
         drawerBody.setOpaque(false);
         drawerBody.setLayout(new BoxLayout(drawerBody, BoxLayout.Y_AXIS));
@@ -435,25 +443,51 @@ public final class ChessPanel extends PluginPanel
 
     private void buildGameDrawer(JPanel body)
     {
-        body.add(drawerHeader("Game actions", "Clock, draw and resign"));
+        body.add(drawerHeader("Game actions", "Local games, computer opponents and resign"));
         body.add(Box.createRigidArea(new Dimension(0, 8)));
 
         boolean local = multiplayer.getMode() == ChessMultiplayerService.Mode.LOCAL;
         JPanel timeRow = labeledChoices();
+        timeRow.setEnabled(local);
         setChildrenEnabled(timeRow, local);
         body.add(timeRow);
         body.add(Box.createRigidArea(new Dimension(0, 6)));
 
-        JButton start = primaryButton(local ? "Start new local game" : "Online game in progress");
+        JButton start = primaryButton(local ? "Start two-player local game" : "Online game in progress");
         start.setEnabled(local);
         start.addActionListener(event -> startNewLocalGame());
         body.add(fullWidth(start));
+
+        if (local)
+        {
+            body.add(sectionDivider());
+            body.add(sectionLabel("PLAY AGAINST BOT"));
+            body.add(Box.createRigidArea(new Dimension(0, 5)));
+
+            botDifficultyBox.setFont(CONTROL_FONT);
+            botDifficultyBox.setMaximumSize(new Dimension(Integer.MAX_VALUE, 31));
+            botDifficultyBox.setAlignmentX(Component.CENTER_ALIGNMENT);
+            body.add(botDifficultyBox);
+            body.add(Box.createRigidArea(new Dimension(0, 6)));
+
+            JPanel botRow = new JPanel(new GridLayout(1, 2, 5, 0));
+            botRow.setOpaque(false);
+            JButton playWhite = secondaryButton("Play White");
+            JButton playBlack = secondaryButton("Play Black");
+            playWhite.addActionListener(event -> startBotGame(ChessColor.WHITE));
+            playBlack.addActionListener(event -> startBotGame(ChessColor.BLACK));
+            botRow.add(playWhite);
+            botRow.add(playBlack);
+            body.add(botRow);
+        }
+
         body.add(Box.createRigidArea(new Dimension(0, 8)));
 
         JPanel row = new JPanel(new GridLayout(1, 2, 5, 0));
         row.setOpaque(false);
         JButton draw = secondaryButton(drawActionText());
-        draw.setEnabled(!controller.getGame().getStatus().isFinished()
+        draw.setEnabled(!botService.isActive()
+            && !controller.getGame().getStatus().isFinished()
             && (!multiplayer.isPlayingOnline() || multiplayer.canLocalPlayerAct()));
         draw.addActionListener(event ->
         {
@@ -653,8 +687,8 @@ public final class ChessPanel extends PluginPanel
 
     private void startNewLocalGame()
     {
-        int minutes = selected(minutesBox, 10);
-        int increment = selected(incrementBox, 0);
+        int minutes = selected(minutesBox, ChessTimeControl.DEFAULT_MINUTES);
+        int increment = selected(incrementBox, ChessTimeControl.DEFAULT_INCREMENT_SECONDS);
         try
         {
             multiplayer.startLocalGame(minutes, increment);
@@ -671,10 +705,27 @@ public final class ChessPanel extends PluginPanel
         refreshUi();
     }
 
+    private void startBotGame(ChessColor humanColor)
+    {
+        BotDifficulty difficulty = (BotDifficulty) botDifficultyBox.getSelectedItem();
+        if (difficulty == null)
+        {
+            difficulty = BotDifficulty.GOBLIN;
+        }
+
+        int minutes = selected(minutesBox, ChessTimeControl.DEFAULT_MINUTES);
+        int increment = selected(incrementBox, ChessTimeControl.DEFAULT_INCREMENT_SECONDS);
+        multiplayer.startBotGame(difficulty, humanColor, minutes, increment);
+        applyBoardOrientation(humanColor == ChessColor.BLACK);
+        showFeedback("Playing " + difficulty.getDisplayName() + " as "
+            + humanColor.displayName() + ".", false);
+        refreshUi();
+    }
+
     private void createPrivateMatch()
     {
-        int minutes = selected(minutesBox, 10);
-        int increment = selected(incrementBox, 0);
+        int minutes = selected(minutesBox, ChessTimeControl.DEFAULT_MINUTES);
+        int increment = selected(incrementBox, ChessTimeControl.DEFAULT_INCREMENT_SECONDS);
         try
         {
             multiplayer.createPrivateMatch(minutes, increment);
@@ -696,7 +747,6 @@ public final class ChessPanel extends PluginPanel
         try
         {
             multiplayer.joinPrivateMatch(entered);
-            joinCodeField.setText("");
             openDrawer = MATCH_DRAWER;
             showFeedback("Joining private match...", false);
             rebuildDrawer();
@@ -772,6 +822,10 @@ public final class ChessPanel extends PluginPanel
 
     private String drawActionText()
     {
+        if (botService.isActive())
+        {
+            return "No bot draws";
+        }
         ChessColor actor = multiplayer.isPlayingOnline()
             ? multiplayer.getLocalColor()
             : controller.getGame().getSideToMove();
@@ -823,7 +877,10 @@ public final class ChessPanel extends PluginPanel
             + '|' + controller.getDrawOfferedBy()
             + '|' + multiplayer.isOpponentConnected()
             + '|' + multiplayer.getRematchRequestedBy()
-            + '|' + multiplayer.getLocalColor();
+            + '|' + multiplayer.getLocalColor()
+            + '|' + botService.isActive()
+            + '|' + botService.isThinking()
+            + '|' + botService.getDifficulty();
     }
 
     private void updateBoardPresentation(boolean overlayVisible)
@@ -874,21 +931,30 @@ public final class ChessPanel extends PluginPanel
         });
     }
 
+    @Override
+    public void onBotChanged()
+    {
+        SwingUtilities.invokeLater(this::refreshUi);
+    }
+
     private void refreshUi()
     {
         refreshClockRows();
+        String notice = botService.isActive() && botService.isThinking()
+            ? botService.getDifficulty().getDisplayName() + " is thinking…"
+            : controller.getNotice();
         statusText.setText("<html><div style='text-align:center;'>"
-            + escapeHtml(controller.getNotice()) + "</div></html>");
+            + escapeHtml(notice) + "</div></html>");
 
         boolean local = multiplayer.getMode() == ChessMultiplayerService.Mode.LOCAL;
-        int minutes = local ? selected(minutesBox, 10) : multiplayer.getInitialMinutes();
-        int increment = local ? selected(incrementBox, 0) : multiplayer.getIncrementSeconds();
+        int minutes = local ? selected(minutesBox, ChessTimeControl.DEFAULT_MINUTES) : multiplayer.getInitialMinutes();
+        int increment = local ? selected(incrementBox, ChessTimeControl.DEFAULT_INCREMENT_SECONDS) : multiplayer.getIncrementSeconds();
         timeControlLabel.setText(timeControl(minutes, increment));
 
         if (local)
         {
-            modeBadge.setText("LOCAL");
-            modeBadge.setForeground(MUTED_TEXT);
+            modeBadge.setText(botService.isActive() ? "BOT" : "LOCAL");
+            modeBadge.setForeground(botService.isActive() ? ACCENT : MUTED_TEXT);
             sessionCard.setVisible(false);
         }
         else
@@ -958,7 +1024,6 @@ public final class ChessPanel extends PluginPanel
                 sessionTitle.setText("Private match");
                 sessionDetail.setText("Synchronizing...");
                 connectionDot.setForeground(WARNING);
-                break;
         }
     }
 
@@ -1049,11 +1114,6 @@ public final class ChessPanel extends PluginPanel
         return button;
     }
 
-    /**
-     * Paint button labels with normal anti-aliased text and keep disabled
-     * actions readable instead of letting the game-style Look & Feel shrink
-     * and heavily fade them.
-     */
     private static final class ReadableButtonUI extends BasicButtonUI
     {
         @Override
@@ -1124,7 +1184,6 @@ public final class ChessPanel extends PluginPanel
             .replace(">", "&gt;");
     }
 
-    @SuppressWarnings("serial")
     private static final class RoundedPanel extends JPanel
     {
         private final Color fill;

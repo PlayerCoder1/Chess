@@ -1,5 +1,6 @@
 package com.playercoder1.ui;
 
+import com.playercoder1.chess.ChessBotService;
 import com.playercoder1.chess.ChessClock;
 import com.playercoder1.chess.ChessColor;
 import com.playercoder1.chess.ChessGame;
@@ -36,10 +37,7 @@ import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 
-/**
- * Interactive chess board rendered over the game canvas. Mouse presses inside
- * its bounds are consumed so they cannot trigger RuneScape actions.
- */
+
 @Singleton
 public final class ChessBoardOverlay extends Overlay implements MouseListener, ChessGameListener
 {
@@ -77,6 +75,7 @@ public final class ChessBoardOverlay extends Overlay implements MouseListener, C
     private final Client client;
     private final LocalChessController controller;
     private final ChessMultiplayerService multiplayer;
+    private final ChessBotService botService;
     private final Rectangle closeBounds = new Rectangle();
     private final Rectangle flipBounds = new Rectangle();
     private final Rectangle boardBounds = new Rectangle();
@@ -109,11 +108,13 @@ public final class ChessBoardOverlay extends Overlay implements MouseListener, C
     public ChessBoardOverlay(
         Client client,
         LocalChessController controller,
-        ChessMultiplayerService multiplayer)
+        ChessMultiplayerService multiplayer,
+        ChessBotService botService)
     {
         this.client = client;
         this.controller = controller;
         this.multiplayer = multiplayer;
+        this.botService = botService;
         controller.addListener(this);
 
         setPosition(OverlayPosition.DYNAMIC);
@@ -361,7 +362,9 @@ public final class ChessBoardOverlay extends Overlay implements MouseListener, C
     {
         if (!multiplayer.isOnline())
         {
-            return "LOCAL";
+            return botService.isActive()
+                ? botService.getDifficulty().getDisplayName().toUpperCase()
+                : "LOCAL";
         }
         if (!multiplayer.isPlayingOnline())
         {
@@ -512,7 +515,9 @@ public final class ChessBoardOverlay extends Overlay implements MouseListener, C
 
     private void drawStatus(Graphics2D g, int y)
     {
-        String status = controller.getNotice();
+        String status = botService.isActive() && botService.isThinking()
+            ? botService.getDifficulty().getDisplayName() + " is thinking…"
+            : controller.getNotice();
         g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, Math.max(9, scaled(11))));
         g.setColor(new Color(226, 226, 226));
         drawCenteredEllipsized(g, status, padding + scaled(4), y, boardSize - scaled(8), statusHeight);

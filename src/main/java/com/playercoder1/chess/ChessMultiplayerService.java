@@ -17,13 +17,6 @@ import net.runelite.client.party.PartyService;
 import net.runelite.client.party.events.UserJoin;
 import net.runelite.client.party.events.UserPart;
 
-/**
- * Coordinates one-use private matches over RuneLite's party transport.
- *
- * <p>The host is authoritative for moves, clocks, draw actions and rematches.
- * The first accepted guest permanently owns the second seat until the room is
- * closed, preventing later party members from taking over an active match.</p>
- */
 @Singleton
 public final class ChessMultiplayerService
 {
@@ -56,6 +49,7 @@ public final class ChessMultiplayerService
     private final PartyService partyService;
     private final EventBus eventBus;
     private final LocalChessController controller;
+    private final ChessBotService botService;
     private final SecureRandom secureRandom = new SecureRandom();
     private final List<Listener> listeners = new ArrayList<>();
     private final Map<Long, Long> lastJoinRequestByMember = new HashMap<>();
@@ -83,11 +77,13 @@ public final class ChessMultiplayerService
     public ChessMultiplayerService(
         PartyService partyService,
         EventBus eventBus,
-        LocalChessController controller)
+        LocalChessController controller,
+        ChessBotService botService)
     {
         this.partyService = partyService;
         this.eventBus = eventBus;
         this.controller = controller;
+        this.botService = botService;
     }
 
     public void start()
@@ -195,6 +191,7 @@ public final class ChessMultiplayerService
     public void createPrivateMatch(int minutes, int increment)
     {
         validateTimeControl(minutes, increment);
+        botService.stopGame();
         if (isOnline())
         {
             leaveMatchInternal(true, false);
@@ -227,6 +224,7 @@ public final class ChessMultiplayerService
 
     public void joinPrivateMatch(String code)
     {
+        botService.stopGame();
         String normalized = normalizeCode(code);
         if (!isValidInvitationCode(normalized))
         {
@@ -268,7 +266,8 @@ public final class ChessMultiplayerService
         }
         if (!isPlayingOnline())
         {
-            return pieceColor == controller.getGame().getSideToMove();
+            return pieceColor == controller.getGame().getSideToMove()
+                && botService.canHumanSelect(pieceColor);
         }
         ChessColor localColor = getLocalColor();
         return localColor != null
@@ -295,6 +294,12 @@ public final class ChessMultiplayerService
         }
         if (!isPlayingOnline())
         {
+            if (botService.isActive()
+                && controller.getGame().getSideToMove() != botService.getHumanColor())
+            {
+                controller.setNotice(botService.getDifficulty().getDisplayName() + " is thinking.");
+                return false;
+            }
             return controller.playMove(move);
         }
 
@@ -334,6 +339,11 @@ public final class ChessMultiplayerService
     {
         if (!isPlayingOnline())
         {
+            if (botService.isActive())
+            {
+                controller.setNotice("Computer opponents do not accept draw offers.");
+                return;
+            }
             controller.offerAcceptOrCancelDraw();
             return;
         }
@@ -363,7 +373,14 @@ public final class ChessMultiplayerService
     {
         if (!isPlayingOnline())
         {
-            controller.resignCurrentPlayer();
+            if (botService.isActive())
+            {
+                controller.resign(botService.getHumanColor());
+            }
+            else
+            {
+                controller.resignCurrentPlayer();
+            }
             return;
         }
         if (!canLocalPlayerAct() || controller.getGame().getStatus().isFinished())
@@ -432,12 +449,28 @@ public final class ChessMultiplayerService
     public void startLocalGame(int minutes, int increment)
     {
         validateTimeControl(minutes, increment);
+        botService.stopGame();
         if (isOnline())
         {
             leaveMatchInternal(true, false);
         }
         controller.configureTimeControl(minutes, increment);
         controller.newGame();
+    }
+
+    public void startBotGame(
+        BotDifficulty difficulty,
+        ChessColor humanColor,
+        int minutes,
+        int increment)
+    {
+        validateTimeControl(minutes, increment);
+        if (isOnline())
+        {
+            leaveMatchInternal(true, false);
+        }
+        botService.startGame(difficulty, humanColor, minutes, increment);
+        notifyListeners();
     }
 
     public void tick()

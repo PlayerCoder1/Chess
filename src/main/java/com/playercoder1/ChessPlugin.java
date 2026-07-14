@@ -1,10 +1,12 @@
 package com.playercoder1;
 
+import com.playercoder1.chess.ChessBotService;
 import com.playercoder1.chess.ChessMultiplayerService;
 import com.playercoder1.chess.ChessPartyMessage;
 import com.playercoder1.ui.ChessBoardOverlay;
 import java.awt.image.BufferedImage;
 import javax.inject.Inject;
+import javax.swing.SwingUtilities;
 import net.runelite.client.input.MouseManager;
 import net.runelite.client.party.WSClient;
 import net.runelite.client.plugins.Plugin;
@@ -16,8 +18,8 @@ import net.runelite.client.util.ImageUtil;
 
 @PluginDescriptor(
     name = "Chess",
-    description = "Play local or private two-player chess in the sidebar or an interactive game overlay",
-    tags = {"chess"}
+    description = "Play local, computer, or private two-player chess in the sidebar or an interactive game overlay",
+    tags = {"chess", "board", "computer", "sidebar", "overlay", "multiplayer", "party"}
 )
 public class ChessPlugin extends Plugin
 {
@@ -42,12 +44,16 @@ public class ChessPlugin extends Plugin
     @Inject
     private ChessMultiplayerService multiplayerService;
 
+    @Inject
+    private ChessBotService botService;
+
     private NavigationButton navigationButton;
 
     @Override
     protected void startUp()
     {
         wsClient.registerMessage(ChessPartyMessage.class);
+        botService.start();
         multiplayerService.start();
         overlayManager.add(boardOverlay);
         mouseManager.registerMouseListener(boardOverlay);
@@ -60,24 +66,32 @@ public class ChessPlugin extends Plugin
             .panel(panel)
             .build();
 
-        panel.start();
-        clientToolbar.addNavigation(navigationButton);
+        SwingUtilities.invokeLater(() ->
+        {
+            panel.start();
+            clientToolbar.addNavigation(navigationButton);
+        });
     }
 
     @Override
     protected void shutDown()
     {
         boardOverlay.setVisible(false);
+        botService.stop();
         mouseManager.unregisterMouseListener(boardOverlay);
         overlayManager.remove(boardOverlay);
         multiplayerService.stop();
         wsClient.unregisterMessage(ChessPartyMessage.class);
 
-        panel.stop();
-        if (navigationButton != null)
+        SwingUtilities.invokeLater(() ->
         {
-            clientToolbar.removeNavigation(navigationButton);
-            navigationButton = null;
-        }
+            panel.stop();
+            if (navigationButton != null)
+            {
+                clientToolbar.removeNavigation(navigationButton);
+                navigationButton = null;
+            }
+        });
     }
+
 }

@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/** Dependency-free legal move generator and chess position model. */
 public final class ChessGame
 {
     public static final String STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -65,6 +64,11 @@ public final class ChessGame
         return game;
     }
 
+    public ChessGame copy()
+    {
+        return new ChessGame(this);
+    }
+
     public Piece getPiece(int square)
     {
         if (square < 0 || square >= Square.BOARD_SIZE)
@@ -89,7 +93,6 @@ public final class ChessGame
         return lastMove;
     }
 
-    /** Restores the previous move used only for board highlighting after a network snapshot. */
     void restoreLastMoveForDisplay(Move move)
     {
         lastMove = move;
