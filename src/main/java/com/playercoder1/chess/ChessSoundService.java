@@ -1,36 +1,24 @@
 package com.playercoder1.chess;
 
-import java.io.BufferedInputStream;
-import java.io.InputStream;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import javax.inject.Inject;
 import javax.inject.Singleton;
-import javax.sound.sampled.AudioInputStream;
-import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.Clip;
-import javax.sound.sampled.LineEvent;
+import net.runelite.client.audio.AudioPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * Plays the bundled chess sounds without blocking RuneLite's client or Swing
- * threads. Resources are PCM WAV files so no external codec or native engine is
- * required.
- */
 @Singleton
 public final class ChessSoundService implements ChessGameListener
 {
     private static final Logger LOG = LoggerFactory.getLogger(ChessSoundService.class);
+    private static final float SOUND_GAIN_DB = 0.0f;
 
     private enum Sound
     {
-        MOVE_SELF("/move-self.wav"),
+        MOVE("/move-self.wav"),
         CAPTURE("/capture.wav"),
         CASTLE("/castle.wav"),
         CHECK("/move-check.wav"),
@@ -46,7 +34,7 @@ public final class ChessSoundService implements ChessGameListener
     }
 
     private final LocalChessController controller;
-    private final Set<Clip> activeClips = Collections.synchronizedSet(new HashSet<>());
+    private final AudioPlayer audioPlayer;
 
     private ExecutorService executor;
     private String previousFen;
@@ -56,9 +44,10 @@ public final class ChessSoundService implements ChessGameListener
     private boolean playbackFailureLogged;
 
     @Inject
-    public ChessSoundService(LocalChessController controller)
+    public ChessSoundService(LocalChessController controller, AudioPlayer audioPlayer)
     {
         this.controller = controller;
+        this.audioPlayer = audioPlayer;
     }
 
     public synchronized void start()
@@ -102,17 +91,6 @@ public final class ChessSoundService implements ChessGameListener
         if (executorToStop != null)
         {
             executorToStop.shutdownNow();
-        }
-
-        Clip[] clipsToClose;
-        synchronized (activeClips)
-        {
-            clipsToClose = activeClips.toArray(new Clip[0]);
-            activeClips.clear();
-        }
-        for (Clip clip : clipsToClose)
-        {
-            clip.close();
         }
     }
 
@@ -159,7 +137,7 @@ public final class ChessSoundService implements ChessGameListener
     {
         if (positionBeforeMove == null || moveUci == null)
         {
-            return Sound.MOVE_SELF;
+            return Sound.MOVE;
         }
 
         try
@@ -169,7 +147,7 @@ public final class ChessSoundService implements ChessGameListener
             Piece movingPiece = previousGame.getPiece(move.getFrom());
             if (movingPiece == null)
             {
-                return Sound.MOVE_SELF;
+                return Sound.MOVE;
             }
 
             int fromFile = Square.file(move.getFrom());
@@ -196,12 +174,12 @@ public final class ChessSoundService implements ChessGameListener
             {
                 return Sound.CAPTURE;
             }
-            return Sound.MOVE_SELF;
+            return Sound.MOVE;
         }
         catch (IllegalArgumentException | IllegalStateException ex)
         {
             LOG.debug("Unable to classify chess move sound for {}", moveUci, ex);
-            return Sound.MOVE_SELF;
+            return Sound.MOVE;
         }
     }
 
@@ -236,35 +214,9 @@ public final class ChessSoundService implements ChessGameListener
 
     private void playNow(Sound sound)
     {
-        try (InputStream raw = ChessSoundService.class.getResourceAsStream(sound.resourcePath))
+        try
         {
-            if (raw == null)
-            {
-                logPlaybackFailureOnce("Missing chess sound resource " + sound.resourcePath, null);
-                return;
-            }
-
-            try (BufferedInputStream buffered = new BufferedInputStream(raw);
-                 AudioInputStream audio = AudioSystem.getAudioInputStream(buffered))
-            {
-                Clip clip = AudioSystem.getClip();
-                clip.open(audio);
-                activeClips.add(clip);
-                clip.addLineListener(event ->
-                {
-                    if (event.getType() == LineEvent.Type.STOP
-                        || event.getType() == LineEvent.Type.CLOSE)
-                    {
-                        activeClips.remove(clip);
-                        if (clip.isOpen())
-                        {
-                            clip.close();
-                        }
-                    }
-                });
-                clip.setFramePosition(0);
-                clip.start();
-            }
+            audioPlayer.play(ChessSoundService.class, sound.resourcePath, SOUND_GAIN_DB);
         }
         catch (Exception ex)
         {
@@ -278,14 +230,8 @@ public final class ChessSoundService implements ChessGameListener
         {
             return;
         }
+
         playbackFailureLogged = true;
-        if (ex == null)
-        {
-            LOG.debug(message);
-        }
-        else
-        {
-            LOG.debug(message, ex);
-        }
+        LOG.debug(message, ex);
     }
 }
