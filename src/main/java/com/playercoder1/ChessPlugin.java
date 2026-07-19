@@ -3,6 +3,7 @@ package com.playercoder1;
 import com.playercoder1.chess.ChessBotService;
 import com.playercoder1.chess.ChessMultiplayerService;
 import com.playercoder1.chess.ChessPartyMessage;
+import com.playercoder1.chess.ChessSoundService;
 import com.playercoder1.ui.ChessBoardOverlay;
 import java.awt.image.BufferedImage;
 import javax.inject.Inject;
@@ -47,6 +48,9 @@ public class ChessPlugin extends Plugin
     @Inject
     private ChessBotService botService;
 
+    @Inject
+    private ChessSoundService soundService;
+
     private NavigationButton navigationButton;
 
     @Override
@@ -55,6 +59,7 @@ public class ChessPlugin extends Plugin
         wsClient.registerMessage(ChessPartyMessage.class);
         botService.start();
         multiplayerService.start();
+        soundService.start();
         overlayManager.add(boardOverlay);
         mouseManager.registerMouseListener(boardOverlay);
 
@@ -76,6 +81,7 @@ public class ChessPlugin extends Plugin
     @Override
     protected void shutDown()
     {
+        soundService.stop();
         boardOverlay.setVisible(false);
         botService.stop();
         mouseManager.unregisterMouseListener(boardOverlay);
