@@ -29,6 +29,12 @@ public final class ChessMultiplayerService
         GUEST_PLAYING
     }
 
+    public enum MatchKind
+    {
+        PRIVATE,
+        MATCHMADE
+    }
+
     @FunctionalInterface
     public interface Listener
     {
@@ -55,6 +61,7 @@ public final class ChessMultiplayerService
     private final Map<Long, Long> lastJoinRequestByMember = new HashMap<>();
 
     private Mode mode = Mode.LOCAL;
+    private MatchKind matchKind;
     private String invitationCode;
     private String matchToken;
     private String previousPartyPassphrase;
@@ -126,6 +133,16 @@ public final class ChessMultiplayerService
         return mode == Mode.HOST_PLAYING || mode == Mode.GUEST_PLAYING;
     }
 
+    public boolean isMatchmade()
+    {
+        return isOnline() && matchKind == MatchKind.MATCHMADE;
+    }
+
+    public MatchKind getMatchKind()
+    {
+        return matchKind;
+    }
+
     public String getInvitationCode()
     {
         return invitationCode;
@@ -190,6 +207,81 @@ public final class ChessMultiplayerService
 
     public void createPrivateMatch(int minutes, int increment)
     {
+        createHostedMatch(
+            generateCode(),
+            minutes,
+            increment,
+            partyService.getPartyPassphrase(),
+            MatchKind.PRIVATE);
+    }
+
+    public void joinPrivateMatch(String code)
+    {
+        String normalized = normalizeCode(code);
+        if (!isValidInvitationCode(normalized))
+        {
+            throw new IllegalArgumentException("Enter the eight-character invitation code.");
+        }
+
+        joinMatch(
+            normalized,
+            partyService.getPartyPassphrase(),
+            MatchKind.PRIVATE,
+            ChessTimeControl.DEFAULT_MINUTES,
+            ChessTimeControl.DEFAULT_INCREMENT_SECONDS);
+    }
+
+
+    String generateInternalMatchCode()
+    {
+        return generateCode();
+    }
+
+    void startMatchmadeHost(
+        String code,
+        int minutes,
+        int increment,
+        String restorePartyPassphrase)
+    {
+        String normalized = normalizeCode(code);
+        if (!isValidInvitationCode(normalized))
+        {
+            throw new IllegalArgumentException("Invalid matchmaking room token.");
+        }
+        createHostedMatch(
+            normalized,
+            minutes,
+            increment,
+            restorePartyPassphrase,
+            MatchKind.MATCHMADE);
+    }
+
+    void startMatchmadeGuest(
+        String code,
+        int minutes,
+        int increment,
+        String restorePartyPassphrase)
+    {
+        String normalized = normalizeCode(code);
+        if (!isValidInvitationCode(normalized))
+        {
+            throw new IllegalArgumentException("Invalid matchmaking room token.");
+        }
+        joinMatch(
+            normalized,
+            restorePartyPassphrase,
+            MatchKind.MATCHMADE,
+            minutes,
+            increment);
+    }
+
+    private void createHostedMatch(
+        String code,
+        int minutes,
+        int increment,
+        String restorePartyPassphrase,
+        MatchKind kind)
+    {
         validateTimeControl(minutes, increment);
         botService.stopGame();
         if (isOnline())
@@ -197,8 +289,9 @@ public final class ChessMultiplayerService
             leaveMatchInternal(true, false);
         }
 
-        previousPartyPassphrase = partyService.getPartyPassphrase();
-        invitationCode = generateCode();
+        previousPartyPassphrase = restorePartyPassphrase;
+        invitationCode = code;
+        matchKind = kind;
         matchToken = UUID.randomUUID().toString();
         initialMinutes = minutes;
         incrementSeconds = increment;
@@ -217,26 +310,29 @@ public final class ChessMultiplayerService
         mode = Mode.HOST_WAITING;
         controller.configureTimeControl(minutes, increment);
         controller.newGame();
-        controller.setNotice("Private match created. Share code " + invitationCode + ".");
+        controller.setNotice(kind == MatchKind.MATCHMADE
+            ? "Match found. Waiting for the opponent connection…"
+            : "Private match created. Share code " + invitationCode + ".");
         partyService.changeParty(PARTY_PREFIX + invitationCode);
         notifyListeners();
     }
 
-    public void joinPrivateMatch(String code)
+    private void joinMatch(
+        String code,
+        String restorePartyPassphrase,
+        MatchKind kind,
+        int expectedMinutes,
+        int expectedIncrement)
     {
         botService.stopGame();
-        String normalized = normalizeCode(code);
-        if (!isValidInvitationCode(normalized))
-        {
-            throw new IllegalArgumentException("Enter the eight-character invitation code.");
-        }
-
         if (isOnline())
         {
             leaveMatchInternal(true, false);
         }
-        previousPartyPassphrase = partyService.getPartyPassphrase();
-        invitationCode = normalized;
+
+        previousPartyPassphrase = restorePartyPassphrase;
+        invitationCode = code;
+        matchKind = kind;
         matchToken = null;
         hostMemberId = 0L;
         guestMemberId = 0L;
@@ -247,8 +343,16 @@ public final class ChessMultiplayerService
         lastOpenBroadcastMillis = 0L;
         lastStateBroadcastMillis = 0L;
         lastJoinRequestByMember.clear();
+        if (kind == MatchKind.MATCHMADE)
+        {
+            validateTimeControl(expectedMinutes, expectedIncrement);
+            initialMinutes = expectedMinutes;
+            incrementSeconds = expectedIncrement;
+        }
         mode = Mode.GUEST_JOINING;
-        controller.setNotice("Joining private match " + invitationCode + "…");
+        controller.setNotice(kind == MatchKind.MATCHMADE
+            ? "Match found. Connecting to the opponent…"
+            : "Joining private match " + invitationCode + "…");
         partyService.changeParty(PARTY_PREFIX + invitationCode);
         notifyListeners();
     }
@@ -640,7 +744,9 @@ public final class ChessMultiplayerService
                 {
                     opponentConnected = false;
                     awaitingHostMoveConfirmation = false;
-                    controller.setNotice("Opponent closed the private match.");
+                    controller.setNotice(isMatchmade()
+                        ? "Opponent left the quick match."
+                        : "Opponent closed the private match.");
                     notifyListeners();
                 }
                 break;
@@ -652,7 +758,10 @@ public final class ChessMultiplayerService
     private void handleOpen(ChessPartyMessage message)
     {
         if (mode != Mode.GUEST_JOINING || message.getMemberId() == 0L
-            || !matchesInvitation(message) || !isSupportedTimeControl(message.initialMinutes, message.incrementSeconds))
+            || !matchesInvitation(message) || !isSupportedTimeControl(message.initialMinutes, message.incrementSeconds)
+            || (isMatchmade()
+                && (message.initialMinutes != initialMinutes
+                    || message.incrementSeconds != incrementSeconds)))
         {
             return;
         }
@@ -694,7 +803,8 @@ public final class ChessMultiplayerService
             mode = Mode.HOST_PLAYING;
             controller.configureTimeControl(initialMinutes, incrementSeconds);
             controller.newGame();
-            controller.setNotice("Private match connected. " + controller.describePosition());
+            controller.setNotice((isMatchmade() ? "Quick match connected. " : "Private match connected. ")
+                + controller.describePosition());
             sendAccept(guestMemberId);
             broadcastState();
             notifyListeners();
@@ -722,6 +832,9 @@ public final class ChessMultiplayerService
             || !matchesInvitation(message)
             || !isValidMatchToken(message.matchToken)
             || !isSupportedTimeControl(message.initialMinutes, message.incrementSeconds)
+            || (isMatchmade()
+                && (message.initialMinutes != initialMinutes
+                    || message.incrementSeconds != incrementSeconds))
             || message.gameNumber < 1
             || message.sequence < 0)
         {
@@ -805,7 +918,9 @@ public final class ChessMultiplayerService
         String reason = sanitizedText(
             message.reason,
             MAX_REASON_LENGTH,
-            "The invitation is no longer available.");
+            isMatchmade()
+                ? "The matchmaking session is no longer available."
+                : "The invitation is no longer available.");
         leaveMatchInternal(true, false);
         controller.setNotice(reason);
     }
@@ -838,7 +953,7 @@ public final class ChessMultiplayerService
         }
         catch (IllegalArgumentException ignored)
         {
-            // The authoritative state response below corrects malformed or stale requests.
+
         }
         broadcastState();
     }
@@ -1144,13 +1259,14 @@ public final class ChessMultiplayerService
                 }
                 catch (RuntimeException ignored)
                 {
-                    // Best effort during shutdown/disconnect.
+
                 }
             }
         }
 
         String restore = restorePreviousParty ? previousPartyPassphrase : null;
         mode = Mode.LOCAL;
+        matchKind = null;
         invitationCode = null;
         matchToken = null;
         hostMemberId = 0L;

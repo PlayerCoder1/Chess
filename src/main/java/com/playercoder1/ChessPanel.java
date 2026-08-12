@@ -5,6 +5,7 @@ import com.playercoder1.chess.ChessBotService;
 import com.playercoder1.chess.ChessClock;
 import com.playercoder1.chess.ChessColor;
 import com.playercoder1.chess.ChessGameListener;
+import com.playercoder1.chess.ChessMatchmakingService;
 import com.playercoder1.chess.ChessMultiplayerService;
 import com.playercoder1.chess.ChessTimeControl;
 import com.playercoder1.chess.LocalChessController;
@@ -36,9 +37,9 @@ import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JTextField;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.JTextField;
 import javax.swing.Timer;
 import javax.swing.plaf.basic.BasicButtonUI;
 import javax.swing.plaf.basic.BasicGraphicsUtils;
@@ -48,7 +49,8 @@ import net.runelite.client.ui.PluginPanel;
 
 @SuppressWarnings("serial")
 public final class ChessPanel extends PluginPanel
-    implements ChessGameListener, ChessMultiplayerService.Listener, ChessBotService.Listener
+    implements ChessGameListener, ChessMultiplayerService.Listener,
+    ChessBotService.Listener
 {
     private static final Integer[] MINUTES = ChessTimeControl.minuteOptions();
     private static final Integer[] INCREMENTS = ChessTimeControl.incrementOptions();
@@ -63,8 +65,7 @@ public final class ChessPanel extends PluginPanel
     private static final Color CARD_BORDER = new Color(70, 70, 70);
     private static final Color DISABLED_BUTTON_TEXT = new Color(186, 186, 186);
 
-    // RuneLite's decorative game font looks great for titles, but becomes hard
-    // to read on small action buttons. Use a normal UI font for controls.
+
     private static final Font CONTROL_FONT = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
     private static final Font CONTROL_FONT_BOLD = new Font(Font.SANS_SERIF, Font.BOLD, 12);
     private static final Font CONTROL_FONT_SMALL = new Font(Font.SANS_SERIF, Font.PLAIN, 11);
@@ -72,10 +73,11 @@ public final class ChessPanel extends PluginPanel
     private static final String BOARD_CARD = "board";
     private static final String OVERLAY_CARD = "overlay";
     private static final String GAME_DRAWER = "game";
-    private static final String MATCH_DRAWER = "match";
+    private static final String PRIVATE_DRAWER = "private";
 
     private final LocalChessController controller;
     private final ChessMultiplayerService multiplayer;
+    private final ChessMatchmakingService matchmaking;
     private final ChessBotService botService;
     private final ChessBoardPanel boardPanel;
     private final ChessBoardOverlay boardOverlay;
@@ -98,12 +100,12 @@ public final class ChessPanel extends PluginPanel
     private final JComboBox<Integer> minutesBox = new JComboBox<>(MINUTES);
     private final JComboBox<Integer> incrementBox = new JComboBox<>(INCREMENTS);
     private final JComboBox<BotDifficulty> botDifficultyBox = new JComboBox<>(BotDifficulty.values());
-    private final JTextField joinCodeField = new JTextField();
 
     private final JButton overlayButton = primaryButton("Show board");
     private final JButton flipButton = secondaryButton("Flip");
     private final JButton gameButton = secondaryButton("Game");
-    private final JButton matchButton = secondaryButton("Match");
+    private final JButton privateButton = secondaryButton("Private");
+    private final JTextField privateCodeField = new JTextField();
 
     private final Timer uiTimer;
     private final Timer feedbackTimer;
@@ -113,21 +115,22 @@ public final class ChessPanel extends PluginPanel
     private String lastDrawerStateKey = "";
     private boolean listenersRegistered;
 
+
     private ChessColor lastAutoOrientedColor;
 
     @Inject
     public ChessPanel(
         LocalChessController controller,
         ChessMultiplayerService multiplayer,
+        ChessMatchmakingService matchmaking,
         ChessBotService botService,
         ChessBoardOverlay boardOverlay)
     {
-        // Use RuneLite's wrapped/scrollable PluginPanel. super(false) makes the
-        // whole client inherit this panel's minimum height, which was the source
-        // of the resize problem after the private-match card appeared.
+
         super();
         this.controller = controller;
         this.multiplayer = multiplayer;
+        this.matchmaking = matchmaking;
         this.botService = botService;
         this.boardOverlay = boardOverlay;
         this.boardPanel = new ChessBoardPanel(controller, multiplayer);
@@ -136,7 +139,22 @@ public final class ChessPanel extends PluginPanel
         incrementBox.setSelectedItem(ChessTimeControl.DEFAULT_INCREMENT_SECONDS);
         botDifficultyBox.setSelectedItem(BotDifficulty.GOBLIN);
 
-        uiTimer = new Timer(200, event -> multiplayer.tick());
+        privateCodeField.setFont(CONTROL_FONT_BOLD);
+        privateCodeField.setHorizontalAlignment(SwingConstants.CENTER);
+        privateCodeField.setBackground(new Color(31, 31, 31));
+        privateCodeField.setForeground(Color.WHITE);
+        privateCodeField.setCaretColor(Color.WHITE);
+        privateCodeField.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(CARD_BORDER),
+            BorderFactory.createEmptyBorder(6, 8, 6, 8)));
+        privateCodeField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 31));
+        privateCodeField.setToolTipText("Enter the eight-character private match code");
+
+        uiTimer = new Timer(200, event ->
+        {
+            multiplayer.tick();
+            matchmaking.tick();
+        });
         feedbackTimer = new Timer(2600, event ->
         {
             feedbackText.setText(" ");
@@ -151,9 +169,7 @@ public final class ChessPanel extends PluginPanel
             refreshUi();
         }));
 
-        // Flipping from the in-game overlay must update the sidebar board too.
-        // This also keeps the physical top/bottom clock rows in agreement with
-        // whichever orientation the player selected.
+
         boardOverlay.setOrientationListener(flipped -> SwingUtilities.invokeLater(() ->
         {
             if (boardPanel.isFlipped() != flipped)
@@ -236,7 +252,7 @@ public final class ChessPanel extends PluginPanel
         JLabel title = new JLabel("Chess");
         title.setForeground(Color.WHITE);
         title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
-        JLabel subtitle = new JLabel("Local and private matches");
+        JLabel subtitle = new JLabel("Local, computer & private • public at Varrock");
         subtitle.setForeground(MUTED_TEXT);
         subtitle.setFont(CONTROL_FONT_SMALL);
         text.add(title);
@@ -326,7 +342,7 @@ public final class ChessPanel extends PluginPanel
         controls.add(overlayButton);
         controls.add(flipButton);
         controls.add(gameButton);
-        controls.add(matchButton);
+        controls.add(privateButton);
         return controls;
     }
 
@@ -383,17 +399,33 @@ public final class ChessPanel extends PluginPanel
             }
         });
 
-        flipButton.addActionListener(event ->
-        {
-            boolean flipped = !boardPanel.isFlipped();
-            applyBoardOrientation(flipped);
-            showFeedback(flipped ? "Black is at the bottom." : "White is at the bottom.", false);
-        });
+        flipButton.addActionListener(event -> flipBoardFromTable());
 
         gameButton.addActionListener(event -> toggleDrawer(GAME_DRAWER));
-        matchButton.addActionListener(event -> toggleDrawer(MATCH_DRAWER));
+        privateButton.addActionListener(event -> toggleDrawer(PRIVATE_DRAWER));
     }
 
+
+    public void openGameActionsFromTable()
+    {
+        showDrawer(GAME_DRAWER);
+    }
+
+
+    public void openPrivateActionsFromTable()
+    {
+        showDrawer(PRIVATE_DRAWER);
+    }
+
+
+    public void flipBoardFromTable()
+    {
+        boolean flipped = !boardPanel.isFlipped();
+        applyBoardOrientation(flipped);
+        showFeedback(flipped ? "Black is at the bottom." : "White is at the bottom.", false);
+    }
+
+    
     private void applyBoardOrientation(boolean flipped)
     {
         if (boardPanel.isFlipped() != flipped)
@@ -413,13 +445,20 @@ public final class ChessPanel extends PluginPanel
         {
             openDrawer = null;
             drawerHost.setVisible(false);
+            updateActionButtons();
+            revalidate();
+            repaint();
+            return;
         }
-        else
-        {
-            openDrawer = drawer;
-            drawerHost.setVisible(true);
-            rebuildDrawer();
-        }
+
+        showDrawer(drawer);
+    }
+
+    private void showDrawer(String drawer)
+    {
+        openDrawer = drawer;
+        drawerHost.setVisible(true);
+        rebuildDrawer();
         updateActionButtons();
         revalidate();
         repaint();
@@ -432,9 +471,9 @@ public final class ChessPanel extends PluginPanel
         {
             buildGameDrawer(drawerBody);
         }
-        else if (MATCH_DRAWER.equals(openDrawer))
+        else if (PRIVATE_DRAWER.equals(openDrawer))
         {
-            buildMatchDrawer(drawerBody);
+            buildPrivateDrawer(drawerBody);
         }
         lastDrawerStateKey = drawerStateKey();
         drawerBody.revalidate();
@@ -461,7 +500,7 @@ public final class ChessPanel extends PluginPanel
         if (local)
         {
             body.add(sectionDivider());
-            body.add(sectionLabel("PLAY AGAINST BOT"));
+            body.add(sectionLabel("PLAY AGAINST COMPUTER"));
             body.add(Box.createRigidArea(new Dimension(0, 5)));
 
             botDifficultyBox.setFont(CONTROL_FONT);
@@ -509,115 +548,284 @@ public final class ChessPanel extends PluginPanel
         row.add(draw);
         row.add(resign);
         body.add(row);
-    }
 
-    private void buildMatchDrawer(JPanel body)
-    {
-        boolean local = multiplayer.getMode() == ChessMultiplayerService.Mode.LOCAL;
-        if (local)
+        if (!local)
         {
-            body.add(drawerHeader("Private match", "One code. Two reserved seats."));
-            body.add(Box.createRigidArea(new Dimension(0, 8)));
-            body.add(labeledChoices());
-            body.add(Box.createRigidArea(new Dimension(0, 6)));
-
-            JButton create = primaryButton("Create private match");
-            create.addActionListener(event -> createPrivateMatch());
-            body.add(fullWidth(create));
             body.add(sectionDivider());
-
-            JLabel joinLabel = sectionLabel("JOIN AN INVITE");
-            body.add(joinLabel);
+            body.add(sectionLabel("ONLINE MATCH"));
             body.add(Box.createRigidArea(new Dimension(0, 5)));
 
-            joinCodeField.setToolTipText("Example: 3W62-6FLN");
-            joinCodeField.setHorizontalAlignment(SwingConstants.CENTER);
-            joinCodeField.setFont(new Font(Font.MONOSPACED, Font.BOLD, 13));
-            joinCodeField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 31));
-            body.add(joinCodeField);
-            body.add(Box.createRigidArea(new Dimension(0, 5)));
-
-            JButton join = secondaryButton("Join code");
-            join.addActionListener(event -> joinPrivateMatch());
-            body.add(fullWidth(join));
-            return;
-        }
-
-        if (multiplayer.getMode() == ChessMultiplayerService.Mode.HOST_WAITING)
-        {
-            body.add(drawerHeader("Waiting for opponent", "The first guest consumes this code."));
-            body.add(Box.createRigidArea(new Dimension(0, 8)));
-
-            String code = ChessMultiplayerService.formatCode(multiplayer.getInvitationCode());
-            JLabel codeLabel = new JLabel(code, SwingConstants.CENTER);
-            codeLabel.setForeground(Color.WHITE);
-            codeLabel.setFont(new Font(Font.MONOSPACED, Font.BOLD, 22));
-            codeLabel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(ACCENT),
-                BorderFactory.createEmptyBorder(8, 5, 8, 5)));
-            codeLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
-            codeLabel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 48));
-            body.add(codeLabel);
+            JButton rematch = primaryButton(rematchActionText());
+            rematch.setEnabled(multiplayer.isPlayingOnline()
+                && controller.getGame().getStatus().isFinished()
+                && multiplayer.isOpponentConnected()
+                && !multiplayer.isRematchRequestedByLocalPlayer());
+            rematch.addActionListener(event ->
+            {
+                multiplayer.requestOrAcceptRematch();
+                rebuildDrawer();
+            });
+            body.add(fullWidth(rematch));
             body.add(Box.createRigidArea(new Dimension(0, 6)));
 
-            JPanel row = new JPanel(new GridLayout(1, 2, 5, 0));
-            row.setOpaque(false);
-            JButton copy = primaryButton("Copy code");
-            copy.addActionListener(event -> copyInvitationCode());
-            JButton cancel = dangerButton("Cancel room");
-            cancel.addActionListener(event -> armDestructiveAction(
-                cancel,
-                "Confirm cancel",
+            JButton leave = dangerButton("Leave online match");
+            leave.addActionListener(event -> armDestructiveAction(
+                leave,
+                "Confirm leave",
                 () ->
                 {
                     multiplayer.leaveMatch();
-                    showFeedback("Private room closed.", true);
+                    showFeedback("Left the online match.", true);
                 }));
-            row.add(copy);
-            row.add(cancel);
-            body.add(row);
+            body.add(fullWidth(leave));
+        }
+    }
+
+
+    private void buildPrivateDrawer(JPanel body)
+    {
+        body.add(drawerHeader("Private friend match", "Create a room or join with an 8-character code"));
+        body.add(Box.createRigidArea(new Dimension(0, 8)));
+
+        if (multiplayer.isMatchmade())
+        {
+            JLabel notice = new JLabel("A public quick match is currently active.");
+            notice.setForeground(MUTED_TEXT);
+            notice.setFont(CONTROL_FONT_SMALL);
+            body.add(notice);
+            body.add(Box.createRigidArea(new Dimension(0, 7)));
+
+            JButton actions = secondaryButton("Open game actions");
+            actions.addActionListener(event -> showDrawer(GAME_DRAWER));
+            body.add(fullWidth(actions));
             return;
         }
 
-        body.add(drawerHeader("Match options", "Rematch, connection and exit"));
-        body.add(Box.createRigidArea(new Dimension(0, 8)));
-
-        JLabel identity = new JLabel(
-            multiplayer.getLocalColor() == null
-                ? "Synchronizing player color..."
-                : "You are playing " + multiplayer.getLocalColor().displayName(),
-            SwingConstants.CENTER);
-        identity.setForeground(Color.WHITE);
-        identity.setFont(CONTROL_FONT_BOLD);
-        identity.setAlignmentX(Component.CENTER_ALIGNMENT);
-        body.add(identity);
-        body.add(Box.createRigidArea(new Dimension(0, 7)));
-
-        JButton rematch = primaryButton(rematchActionText());
-        rematch.setEnabled(multiplayer.isPlayingOnline()
-            && controller.getGame().getStatus().isFinished()
-            && multiplayer.isOpponentConnected()
-            && !multiplayer.isRematchRequestedByLocalPlayer());
-        rematch.addActionListener(event ->
+        switch (multiplayer.getMode())
         {
-            multiplayer.requestOrAcceptRematch();
-            rebuildDrawer();
-        });
-        body.add(fullWidth(rematch));
-        body.add(Box.createRigidArea(new Dimension(0, 6)));
+            case LOCAL:
+                body.add(sectionLabel("CREATE PRIVATE ROOM"));
+                body.add(Box.createRigidArea(new Dimension(0, 5)));
+                body.add(labeledChoices());
+                body.add(Box.createRigidArea(new Dimension(0, 6)));
 
-        JButton leave = dangerButton("Leave private match");
-        leave.addActionListener(event -> armDestructiveAction(
-            leave,
-            "Confirm leave",
-            () ->
-            {
-                multiplayer.leaveMatch();
-                showFeedback("Left the private match.", true);
-            }));
-        body.add(fullWidth(leave));
+                JButton create = primaryButton("Create private match");
+                create.addActionListener(event -> createPrivateMatchFromPanel());
+                body.add(fullWidth(create));
+
+                body.add(sectionDivider());
+                body.add(sectionLabel("JOIN PRIVATE ROOM"));
+                body.add(Box.createRigidArea(new Dimension(0, 5)));
+                privateCodeField.setText(privateCodeField.getText().toUpperCase());
+                body.add(privateCodeField);
+                body.add(Box.createRigidArea(new Dimension(0, 6)));
+
+                JButton join = secondaryButton("Join with code");
+                join.addActionListener(event -> joinPrivateMatchFromPanel());
+                body.add(fullWidth(join));
+                body.add(Box.createRigidArea(new Dimension(0, 7)));
+
+                JLabel hint = new JLabel("Codes are one-use and reserve exactly two players.");
+                hint.setForeground(MUTED_TEXT);
+                hint.setFont(CONTROL_FONT_SMALL);
+                body.add(hint);
+                break;
+
+            case HOST_WAITING:
+                body.add(sectionLabel("ROOM READY"));
+                body.add(Box.createRigidArea(new Dimension(0, 5)));
+
+                JLabel code = new JLabel(
+                    ChessMultiplayerService.formatCode(multiplayer.getInvitationCode()),
+                    SwingConstants.CENTER);
+                code.setOpaque(true);
+                code.setBackground(new Color(31, 31, 31));
+                code.setForeground(ACCENT_HOVER);
+                code.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(new Color(82, 66, 42)),
+                    BorderFactory.createEmptyBorder(8, 6, 8, 6)));
+                code.setFont(CONTROL_FONT_BOLD.deriveFont(16f));
+                code.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
+                code.setAlignmentX(Component.CENTER_ALIGNMENT);
+                body.add(code);
+                body.add(Box.createRigidArea(new Dimension(0, 6)));
+
+                JLabel waiting = new JLabel("Waiting for your friend to join…");
+                waiting.setForeground(WARNING);
+                waiting.setFont(CONTROL_FONT_SMALL);
+                body.add(waiting);
+                body.add(Box.createRigidArea(new Dimension(0, 7)));
+
+                JButton copy = primaryButton("Copy invite code");
+                copy.addActionListener(event -> copyPrivateInviteCode());
+                body.add(fullWidth(copy));
+                body.add(Box.createRigidArea(new Dimension(0, 6)));
+
+                JButton cancel = dangerButton("Cancel private room");
+                cancel.addActionListener(event -> armDestructiveAction(
+                    cancel,
+                    "Confirm cancel",
+                    () ->
+                    {
+                        multiplayer.leaveMatch();
+                        showFeedback("Private room closed.", false);
+                    }));
+                body.add(fullWidth(cancel));
+                break;
+
+            case GUEST_JOINING:
+                body.add(sectionLabel("CONNECTING TO ROOM"));
+                body.add(Box.createRigidArea(new Dimension(0, 5)));
+
+                JLabel joiningCode = new JLabel(
+                    ChessMultiplayerService.formatCode(multiplayer.getInvitationCode()),
+                    SwingConstants.CENTER);
+                joiningCode.setForeground(ACCENT_HOVER);
+                joiningCode.setFont(CONTROL_FONT_BOLD.deriveFont(15f));
+                joiningCode.setAlignmentX(Component.CENTER_ALIGNMENT);
+                body.add(joiningCode);
+                body.add(Box.createRigidArea(new Dimension(0, 5)));
+
+                JLabel connecting = new JLabel("Waiting for the host to accept the connection…");
+                connecting.setForeground(WARNING);
+                connecting.setFont(CONTROL_FONT_SMALL);
+                body.add(connecting);
+                body.add(Box.createRigidArea(new Dimension(0, 7)));
+
+                JButton cancelJoin = dangerButton("Cancel connection");
+                cancelJoin.addActionListener(event -> armDestructiveAction(
+                    cancelJoin,
+                    "Confirm cancel",
+                    () ->
+                    {
+                        multiplayer.leaveMatch();
+                        showFeedback("Private connection cancelled.", false);
+                    }));
+                body.add(fullWidth(cancelJoin));
+                break;
+
+            case HOST_PLAYING:
+            case GUEST_PLAYING:
+                if (multiplayer.getMatchKind() == ChessMultiplayerService.MatchKind.PRIVATE)
+                {
+                    body.add(sectionLabel("PRIVATE MATCH CONNECTED"));
+                    body.add(Box.createRigidArea(new Dimension(0, 5)));
+
+                    JLabel connected = new JLabel(multiplayer.isOpponentConnected()
+                        ? "Your friend is connected."
+                        : "Friend disconnected — waiting for reconnect.");
+                    connected.setForeground(multiplayer.isOpponentConnected() ? SUCCESS : WARNING);
+                    connected.setFont(CONTROL_FONT_SMALL);
+                    body.add(connected);
+                    body.add(Box.createRigidArea(new Dimension(0, 7)));
+
+                    JButton showBoard = primaryButton(boardOverlay.isVisible()
+                        ? "Board is open in game"
+                        : "Show board in game");
+                    showBoard.setEnabled(!boardOverlay.isVisible());
+                    showBoard.addActionListener(event ->
+                    {
+                        boardOverlay.setVisible(true);
+                        boardOverlay.fitToCanvasIfNeeded();
+                        refreshUi();
+                    });
+                    body.add(fullWidth(showBoard));
+                    body.add(Box.createRigidArea(new Dimension(0, 6)));
+
+                    JButton gameActions = secondaryButton("Open game actions");
+                    gameActions.addActionListener(event -> showDrawer(GAME_DRAWER));
+                    body.add(fullWidth(gameActions));
+                    body.add(Box.createRigidArea(new Dimension(0, 6)));
+
+                    JButton leave = dangerButton("Leave private match");
+                    leave.addActionListener(event -> armDestructiveAction(
+                        leave,
+                        "Confirm leave",
+                        () ->
+                        {
+                            multiplayer.leaveMatch();
+                            showFeedback("Left the private match.", false);
+                        }));
+                    body.add(fullWidth(leave));
+                }
+                break;
+
+            default:
+                break;
+        }
     }
 
+    private void createPrivateMatchFromPanel()
+    {
+        int minutes = selected(minutesBox, ChessTimeControl.DEFAULT_MINUTES);
+        int increment = selected(incrementBox, ChessTimeControl.DEFAULT_INCREMENT_SECONDS);
+        try
+        {
+            if (matchmaking.isLobbyOpen())
+            {
+                matchmaking.closeLobby();
+            }
+            multiplayer.createPrivateMatch(minutes, increment);
+            boardPanel.clearSelection();
+            boardOverlay.clearSelection();
+            showFeedback("Private room created. Share the invite code with your friend.", false);
+        }
+        catch (IllegalArgumentException | IllegalStateException ex)
+        {
+            showFeedback(ex.getMessage(), true);
+        }
+        refreshUi();
+    }
+
+    private void joinPrivateMatchFromPanel()
+    {
+        String code = privateCodeField.getText();
+        if (code == null || code.trim().isEmpty())
+        {
+            showFeedback("Enter your friend's private match code.", true);
+            return;
+        }
+
+        try
+        {
+            if (matchmaking.isLobbyOpen())
+            {
+                matchmaking.closeLobby();
+            }
+            multiplayer.joinPrivateMatch(code);
+            privateCodeField.setText(ChessMultiplayerService.formatCode(multiplayer.getInvitationCode()));
+            showFeedback("Connecting to the private match…", false);
+        }
+        catch (IllegalArgumentException | IllegalStateException ex)
+        {
+            showFeedback(ex.getMessage(), true);
+        }
+        refreshUi();
+    }
+
+    private void copyPrivateInviteCode()
+    {
+        String code = multiplayer.getInvitationCode();
+        if (code == null || code.isEmpty())
+        {
+            showFeedback("No active private room code.", true);
+            return;
+        }
+
+        try
+        {
+            String formatted = ChessMultiplayerService.formatCode(code);
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                new StringSelection(formatted), null);
+            showFeedback("Invite code copied.", false);
+        }
+        catch (RuntimeException ex)
+        {
+            showFeedback("Could not copy the invite code.", true);
+        }
+    }
+
+    
     private JPanel drawerHeader(String titleText, String subtitleText)
     {
         JPanel panel = new JPanel();
@@ -691,6 +899,10 @@ public final class ChessPanel extends PluginPanel
         int increment = selected(incrementBox, ChessTimeControl.DEFAULT_INCREMENT_SECONDS);
         try
         {
+            if (matchmaking.isLobbyOpen())
+            {
+                matchmaking.closeLobby();
+            }
             multiplayer.startLocalGame(minutes, increment);
             boardPanel.clearSelection();
             boardOverlay.clearSelection();
@@ -715,6 +927,10 @@ public final class ChessPanel extends PluginPanel
 
         int minutes = selected(minutesBox, ChessTimeControl.DEFAULT_MINUTES);
         int increment = selected(incrementBox, ChessTimeControl.DEFAULT_INCREMENT_SECONDS);
+        if (matchmaking.isLobbyOpen())
+        {
+            matchmaking.closeLobby();
+        }
         multiplayer.startBotGame(difficulty, humanColor, minutes, increment);
         applyBoardOrientation(humanColor == ChessColor.BLACK);
         showFeedback("Playing " + difficulty.getDisplayName() + " as "
@@ -722,62 +938,12 @@ public final class ChessPanel extends PluginPanel
         refreshUi();
     }
 
-    private void createPrivateMatch()
-    {
-        int minutes = selected(minutesBox, ChessTimeControl.DEFAULT_MINUTES);
-        int increment = selected(incrementBox, ChessTimeControl.DEFAULT_INCREMENT_SECONDS);
-        try
-        {
-            multiplayer.createPrivateMatch(minutes, increment);
-            copyInvitationCode();
-            openDrawer = MATCH_DRAWER;
-            showFeedback("Room created. Invite code copied.", false);
-            rebuildDrawer();
-        }
-        catch (IllegalArgumentException ex)
-        {
-            showFeedback(ex.getMessage(), true);
-        }
-        refreshUi();
-    }
-
-    private void joinPrivateMatch()
-    {
-        String entered = joinCodeField.getText();
-        try
-        {
-            multiplayer.joinPrivateMatch(entered);
-            openDrawer = MATCH_DRAWER;
-            showFeedback("Joining private match...", false);
-            rebuildDrawer();
-        }
-        catch (IllegalArgumentException ex)
-        {
-            showFeedback(ex.getMessage(), true);
-        }
-        refreshUi();
-    }
-
-    private void copyInvitationCode()
-    {
-        String code = multiplayer.getInvitationCode();
-        if (code == null || code.isEmpty())
-        {
-            return;
-        }
-        String formatted = ChessMultiplayerService.formatCode(code);
-        try
-        {
-            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
-                new StringSelection(formatted), null);
-            showFeedback("Invite code " + formatted + " copied.", false);
-        }
-        catch (RuntimeException ex)
-        {
-            showFeedback("Clipboard unavailable. Code: " + formatted, true);
-        }
-    }
-
+    
+    
+    
+    
+    
+    
     private void armDestructiveAction(JButton button, String confirmationText, Runnable action)
     {
         if (armedButton == button)
@@ -873,6 +1039,9 @@ public final class ChessPanel extends PluginPanel
     {
         return String.valueOf(openDrawer)
             + '|' + multiplayer.getMode()
+            + '|' + multiplayer.getMatchKind()
+            + '|' + multiplayer.getInvitationCode()
+            + '|' + multiplayer.isMatchmade()
             + '|' + controller.getGame().getStatus()
             + '|' + controller.getDrawOfferedBy()
             + '|' + multiplayer.isOpponentConnected()
@@ -895,7 +1064,7 @@ public final class ChessPanel extends PluginPanel
     private void updateActionButtons()
     {
         gameButton.setText(GAME_DRAWER.equals(openDrawer) ? "Close game" : "Game");
-        matchButton.setText(MATCH_DRAWER.equals(openDrawer) ? "Close match" : "Match");
+        privateButton.setText(PRIVATE_DRAWER.equals(openDrawer) ? "Close private" : "Private");
     }
 
     @Override
@@ -911,10 +1080,6 @@ public final class ChessPanel extends PluginPanel
         {
             ChessColor localColor = multiplayer.getLocalColor();
 
-            // Orient the board automatically only when a player is first
-            // assigned a color, or when a rematch genuinely swaps colors.
-            // Clock snapshots, reconnect pings, and presence updates must not
-            // undo a manual flip every few seconds.
             if (localColor != null && localColor != lastAutoOrientedColor)
             {
                 lastAutoOrientedColor = localColor;
@@ -922,8 +1087,7 @@ public final class ChessPanel extends PluginPanel
             }
             else if (multiplayer.getMode() == ChessMultiplayerService.Mode.LOCAL)
             {
-                // Allow the next private match to choose its natural starting
-                // orientation without changing the player's current local view.
+
                 lastAutoOrientedColor = null;
             }
 
@@ -947,8 +1111,18 @@ public final class ChessPanel extends PluginPanel
             + escapeHtml(notice) + "</div></html>");
 
         boolean local = multiplayer.getMode() == ChessMultiplayerService.Mode.LOCAL;
-        int minutes = local ? selected(minutesBox, ChessTimeControl.DEFAULT_MINUTES) : multiplayer.getInitialMinutes();
-        int increment = local ? selected(incrementBox, ChessTimeControl.DEFAULT_INCREMENT_SECONDS) : multiplayer.getIncrementSeconds();
+        int minutes;
+        int increment;
+        if (local)
+        {
+            minutes = selected(minutesBox, ChessTimeControl.DEFAULT_MINUTES);
+            increment = selected(incrementBox, ChessTimeControl.DEFAULT_INCREMENT_SECONDS);
+        }
+        else
+        {
+            minutes = multiplayer.getInitialMinutes();
+            increment = multiplayer.getIncrementSeconds();
+        }
         timeControlLabel.setText(timeControl(minutes, increment));
 
         if (local)
@@ -959,7 +1133,9 @@ public final class ChessPanel extends PluginPanel
         }
         else
         {
-            modeBadge.setText(multiplayer.isPlayingOnline() ? "ONLINE" : "ROOM");
+            modeBadge.setText(multiplayer.isMatchmade()
+                ? "MATCH"
+                : (multiplayer.isPlayingOnline() ? "ONLINE" : "ROOM"));
             modeBadge.setForeground(multiplayer.isOpponentConnected() ? SUCCESS : WARNING);
             sessionCard.setVisible(true);
             updateSessionCard();
@@ -996,8 +1172,34 @@ public final class ChessPanel extends PluginPanel
             + ChessClock.format(clock.getRemainingMillis(color));
     }
 
+    
     private void updateSessionCard()
     {
+        if (multiplayer.isMatchmade())
+        {
+            switch (multiplayer.getMode())
+            {
+                case HOST_WAITING:
+                case GUEST_JOINING:
+                    sessionTitle.setText("Match found");
+                    sessionDetail.setText("Connecting automatically to opponent");
+                    connectionDot.setForeground(WARNING);
+                    return;
+                case HOST_PLAYING:
+                case GUEST_PLAYING:
+                    sessionTitle.setText(multiplayer.getLocalColor() == null
+                        ? "Quick match"
+                        : "Playing as " + multiplayer.getLocalColor().displayName());
+                    sessionDetail.setText(multiplayer.isOpponentConnected()
+                        ? "Unrated opponent connected"
+                        : "Opponent disconnected — reconnecting");
+                    connectionDot.setForeground(multiplayer.isOpponentConnected() ? SUCCESS : DANGER);
+                    return;
+                default:
+                    break;
+            }
+        }
+
         switch (multiplayer.getMode())
         {
             case HOST_WAITING:
@@ -1113,6 +1315,7 @@ public final class ChessPanel extends PluginPanel
         button.setPreferredSize(new Dimension(0, 32));
         return button;
     }
+
 
     private static final class ReadableButtonUI extends BasicButtonUI
     {
