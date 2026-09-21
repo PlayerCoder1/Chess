@@ -49,8 +49,8 @@ import net.runelite.client.ui.PluginPanel;
 
 @SuppressWarnings("serial")
 public final class ChessPanel extends PluginPanel
-    implements ChessGameListener, ChessMultiplayerService.Listener,
-    ChessBotService.Listener
+        implements ChessGameListener, ChessMultiplayerService.Listener,
+        ChessBotService.Listener, ChessMatchmakingService.Listener
 {
     private static final Integer[] MINUTES = ChessTimeControl.minuteOptions();
     private static final Integer[] INCREMENTS = ChessTimeControl.incrementOptions();
@@ -92,6 +92,7 @@ public final class ChessPanel extends PluginPanel
     private final JLabel sessionDetail = new JLabel(" ");
     private final JLabel connectionDot = new JLabel("●");
 
+    private final JPanel boardCard;
     private final JPanel boardHost = new JPanel(new CardLayout());
     private final JPanel drawerHost = new RoundedPanel(CARD_BACKGROUND, CARD_BORDER, 10);
     private final JPanel drawerBody = new JPanel();
@@ -107,6 +108,12 @@ public final class ChessPanel extends PluginPanel
     private final JButton privateButton = secondaryButton("Private");
     private final JTextField privateCodeField = new JTextField();
 
+    private final JButton onlineButton = primaryButton("Find opponent");
+    private final JPanel lobbyCard = new RoundedPanel(CARD_BACKGROUND, CARD_BORDER, 10);
+    private final JLabel lobbyStatus = new JLabel("Choose a time control", SwingConstants.CENTER);
+    private final JButton cancelSearchButton = secondaryButton("Cancel search");
+    private final JButton[] queueButtons = new JButton[ChessMatchmakingService.queuePresets().length];
+
     private final Timer uiTimer;
     private final Timer feedbackTimer;
     private Timer confirmTimer;
@@ -120,11 +127,11 @@ public final class ChessPanel extends PluginPanel
 
     @Inject
     public ChessPanel(
-        LocalChessController controller,
-        ChessMultiplayerService multiplayer,
-        ChessMatchmakingService matchmaking,
-        ChessBotService botService,
-        ChessBoardOverlay boardOverlay)
+            LocalChessController controller,
+            ChessMultiplayerService multiplayer,
+            ChessMatchmakingService matchmaking,
+            ChessBotService botService,
+            ChessBoardOverlay boardOverlay)
     {
 
         super();
@@ -145,15 +152,15 @@ public final class ChessPanel extends PluginPanel
         privateCodeField.setForeground(Color.WHITE);
         privateCodeField.setCaretColor(Color.WHITE);
         privateCodeField.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(CARD_BORDER),
-            BorderFactory.createEmptyBorder(6, 8, 6, 8)));
+                BorderFactory.createLineBorder(CARD_BORDER),
+                BorderFactory.createEmptyBorder(6, 8, 6, 8)));
         privateCodeField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 31));
-        privateCodeField.setToolTipText("Enter the eight-character private match code");
 
         uiTimer = new Timer(200, event ->
         {
             multiplayer.tick();
             matchmaking.tick();
+            refreshLobby();
         });
         feedbackTimer = new Timer(2600, event ->
         {
@@ -188,7 +195,12 @@ public final class ChessPanel extends PluginPanel
         root.setLayout(new BoxLayout(root, BoxLayout.Y_AXIS));
         root.add(buildHeader());
         root.add(Box.createRigidArea(new Dimension(0, 7)));
-        root.add(buildBoardCard());
+        root.add(fullWidth(onlineButton));
+        root.add(Box.createRigidArea(new Dimension(0, 5)));
+        root.add(buildLobbyCard());
+        root.add(Box.createRigidArea(new Dimension(0, 2)));
+        boardCard = buildBoardCard();
+        root.add(boardCard);
         root.add(Box.createRigidArea(new Dimension(0, 7)));
         root.add(buildPrimaryControls());
         root.add(Box.createRigidArea(new Dimension(0, 7)));
@@ -217,6 +229,7 @@ public final class ChessPanel extends PluginPanel
             controller.addListener(this);
             multiplayer.addListener(this);
             botService.addListener(this);
+            matchmaking.addListener(this);
             listenersRegistered = true;
         }
         uiTimer.start();
@@ -234,6 +247,7 @@ public final class ChessPanel extends PluginPanel
             controller.removeListener(this);
             multiplayer.removeListener(this);
             botService.removeListener(this);
+            matchmaking.removeListener(this);
             listenersRegistered = false;
         }
     }
@@ -252,7 +266,7 @@ public final class ChessPanel extends PluginPanel
         JLabel title = new JLabel("Chess");
         title.setForeground(Color.WHITE);
         title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
-        JLabel subtitle = new JLabel("Local, computer & private • public at Varrock");
+        JLabel subtitle = new JLabel("Play anywhere");
         subtitle.setForeground(MUTED_TEXT);
         subtitle.setFont(CONTROL_FONT_SMALL);
         text.add(title);
@@ -273,6 +287,141 @@ public final class ChessPanel extends PluginPanel
         header.add(text, BorderLayout.CENTER);
         header.add(meta, BorderLayout.EAST);
         return header;
+    }
+
+    private JPanel buildLobbyCard()
+    {
+        lobbyCard.setLayout(new BoxLayout(lobbyCard, BoxLayout.Y_AXIS));
+        lobbyCard.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        lobbyCard.setMaximumSize(new Dimension(Integer.MAX_VALUE, 310));
+        lobbyCard.setVisible(false);
+        lobbyCard.add(drawerHeader("Online chess", "Unrated • play from anywhere"));
+        lobbyCard.add(Box.createRigidArea(new Dimension(0, 7)));
+
+        JPanel queues = new JPanel(new GridLayout(3, 3, 4, 4));
+        queues.setOpaque(false);
+        queues.setMaximumSize(new Dimension(Integer.MAX_VALUE, 140));
+        queues.setPreferredSize(new Dimension(190, 140));
+        int[][] presets = ChessMatchmakingService.queuePresets();
+        for (int i = 0; i < presets.length; i++)
+        {
+            final int minutes = presets[i][0];
+            final int increment = presets[i][1];
+            JButton button = secondaryButton("");
+            button.setFont(CONTROL_FONT_SMALL.deriveFont(10f));
+            button.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(CARD_BORDER),
+                    BorderFactory.createEmptyBorder(4, 2, 4, 2)));
+            button.addActionListener(event ->
+            {
+                try
+                {
+                    matchmaking.joinQueue(minutes, increment);
+                }
+                catch (IllegalArgumentException | IllegalStateException ex)
+                {
+                    showFeedback(ex.getMessage(), true);
+                }
+                refreshUi();
+            });
+            queueButtons[i] = button;
+            queues.add(button);
+        }
+        lobbyCard.add(queues);
+        lobbyCard.add(Box.createRigidArea(new Dimension(0, 7)));
+        lobbyStatus.setForeground(MUTED_TEXT);
+        lobbyStatus.setFont(CONTROL_FONT_SMALL);
+        lobbyStatus.setAlignmentX(Component.CENTER_ALIGNMENT);
+        lobbyStatus.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+        lobbyCard.add(lobbyStatus);
+        lobbyCard.add(Box.createRigidArea(new Dimension(0, 6)));
+        cancelSearchButton.addActionListener(event -> matchmaking.cancelQueue());
+        lobbyCard.add(fullWidth(cancelSearchButton));
+        lobbyCard.add(Box.createRigidArea(new Dimension(0, 5)));
+        JButton leave = secondaryButton("Leave lobby");
+        leave.addActionListener(event ->
+        {
+            matchmaking.closeLobby();
+            lobbyCard.setVisible(false);
+            refreshUi();
+        });
+        lobbyCard.add(fullWidth(leave));
+        return lobbyCard;
+    }
+
+    private void toggleLobby()
+    {
+        if (multiplayer.isOnline())
+        {
+            showDrawer(GAME_DRAWER);
+            return;
+        }
+        if (lobbyCard.isVisible())
+        {
+
+            lobbyCard.setVisible(false);
+        }
+        else
+        {
+            try
+            {
+                matchmaking.openLobby();
+                openDrawer = null;
+                drawerHost.setVisible(false);
+                lobbyCard.setVisible(true);
+            }
+            catch (IllegalStateException ex)
+            {
+                showFeedback(ex.getMessage(), true);
+            }
+        }
+        refreshUi();
+    }
+
+    private void refreshLobby()
+    {
+        if (multiplayer.isOnline() || !matchmaking.isLobbyOpen())
+        {
+            lobbyCard.setVisible(false);
+        }
+        boardCard.setVisible(!lobbyCard.isVisible());
+        long elapsed = matchmaking.getSearchElapsedSeconds();
+        String elapsedText = String.format("%d:%02d", elapsed / 60, elapsed % 60);
+        onlineButton.setText(multiplayer.isOnline() ? "Online match • actions"
+                : matchmaking.isConnecting() ? "Connecting opponent…"
+                : matchmaking.isSearching() ? "Searching • " + elapsedText
+                : lobbyCard.isVisible() ? "Hide online lobby" : "Find opponent");
+        if (!lobbyCard.isVisible())
+        {
+            return;
+        }
+        boolean ready = matchmaking.isLobbyReady();
+        int[][] presets = ChessMatchmakingService.queuePresets();
+        for (int i = 0; i < presets.length; i++)
+        {
+            int minutes = presets[i][0];
+            int increment = presets[i][1];
+            boolean selected = matchmaking.isSelectedQueue(minutes, increment);
+            JButton button = queueButtons[i];
+            button.setText(minutes + "+" + increment + "\n"
+                    + matchmaking.getQueueCount(minutes, increment) + " queued");
+            button.setSelected(selected);
+            button.setBackground(selected ? ACCENT : new Color(66, 66, 66));
+            button.setForeground(selected ? Color.BLACK : Color.WHITE);
+            button.setEnabled(ready && !matchmaking.isConnecting() && !selected);
+        }
+        lobbyStatus.setText(!ready ? "Connecting to lobby…"
+                : matchmaking.isConnecting() ? "Opponent found • connecting…"
+                : matchmaking.isSearching() ? "Searching " + timeControl(matchmaking.getInitialMinutes(),
+                matchmaking.getIncrementSeconds()) + " • " + elapsedText
+                : "Choose a time control");
+        cancelSearchButton.setEnabled(matchmaking.isSearching());
+    }
+
+    @Override
+    public void onMatchmakingChanged()
+    {
+        SwingUtilities.invokeLater(this::refreshUi);
     }
 
     private JPanel buildBoardCard()
@@ -399,6 +548,8 @@ public final class ChessPanel extends PluginPanel
             }
         });
 
+        onlineButton.addActionListener(event -> toggleLobby());
+
         flipButton.addActionListener(event -> flipBoardFromTable());
 
         gameButton.addActionListener(event -> toggleDrawer(GAME_DRAWER));
@@ -425,7 +576,7 @@ public final class ChessPanel extends PluginPanel
         showFeedback(flipped ? "Black is at the bottom." : "White is at the bottom.", false);
     }
 
-    
+
     private void applyBoardOrientation(boolean flipped)
     {
         if (boardPanel.isFlipped() != flipped)
@@ -456,6 +607,8 @@ public final class ChessPanel extends PluginPanel
 
     private void showDrawer(String drawer)
     {
+        lobbyCard.setVisible(false);
+        refreshLobby();
         openDrawer = drawer;
         drawerHost.setVisible(true);
         rebuildDrawer();
@@ -526,8 +679,8 @@ public final class ChessPanel extends PluginPanel
         row.setOpaque(false);
         JButton draw = secondaryButton(drawActionText());
         draw.setEnabled(!botService.isActive()
-            && !controller.getGame().getStatus().isFinished()
-            && (!multiplayer.isPlayingOnline() || multiplayer.canLocalPlayerAct()));
+                && !controller.getGame().getStatus().isFinished()
+                && (!multiplayer.isPlayingOnline() || multiplayer.canLocalPlayerAct()));
         draw.addActionListener(event ->
         {
             multiplayer.offerAcceptOrCancelDraw();
@@ -536,15 +689,15 @@ public final class ChessPanel extends PluginPanel
 
         JButton resign = dangerButton("Resign");
         resign.setEnabled(!controller.getGame().getStatus().isFinished()
-            && (!multiplayer.isPlayingOnline() || multiplayer.canLocalPlayerAct()));
+                && (!multiplayer.isPlayingOnline() || multiplayer.canLocalPlayerAct()));
         resign.addActionListener(event -> armDestructiveAction(
-            resign,
-            "Confirm resign",
-            () ->
-            {
-                multiplayer.resign();
-                showFeedback("Game resigned.", true);
-            }));
+                resign,
+                "Confirm resign",
+                () ->
+                {
+                    multiplayer.resign();
+                    showFeedback("Game resigned.", true);
+                }));
         row.add(draw);
         row.add(resign);
         body.add(row);
@@ -557,9 +710,9 @@ public final class ChessPanel extends PluginPanel
 
             JButton rematch = primaryButton(rematchActionText());
             rematch.setEnabled(multiplayer.isPlayingOnline()
-                && controller.getGame().getStatus().isFinished()
-                && multiplayer.isOpponentConnected()
-                && !multiplayer.isRematchRequestedByLocalPlayer());
+                    && controller.getGame().getStatus().isFinished()
+                    && multiplayer.isOpponentConnected()
+                    && !multiplayer.isRematchRequestedByLocalPlayer());
             rematch.addActionListener(event ->
             {
                 multiplayer.requestOrAcceptRematch();
@@ -570,13 +723,13 @@ public final class ChessPanel extends PluginPanel
 
             JButton leave = dangerButton("Leave online match");
             leave.addActionListener(event -> armDestructiveAction(
-                leave,
-                "Confirm leave",
-                () ->
-                {
-                    multiplayer.leaveMatch();
-                    showFeedback("Left the online match.", true);
-                }));
+                    leave,
+                    "Confirm leave",
+                    () ->
+                    {
+                        multiplayer.leaveMatch();
+                        showFeedback("Left the online match.", true);
+                    }));
             body.add(fullWidth(leave));
         }
     }
@@ -636,14 +789,14 @@ public final class ChessPanel extends PluginPanel
                 body.add(Box.createRigidArea(new Dimension(0, 5)));
 
                 JLabel code = new JLabel(
-                    ChessMultiplayerService.formatCode(multiplayer.getInvitationCode()),
-                    SwingConstants.CENTER);
+                        ChessMultiplayerService.formatCode(multiplayer.getInvitationCode()),
+                        SwingConstants.CENTER);
                 code.setOpaque(true);
                 code.setBackground(new Color(31, 31, 31));
                 code.setForeground(ACCENT_HOVER);
                 code.setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(new Color(82, 66, 42)),
-                    BorderFactory.createEmptyBorder(8, 6, 8, 6)));
+                        BorderFactory.createLineBorder(new Color(82, 66, 42)),
+                        BorderFactory.createEmptyBorder(8, 6, 8, 6)));
                 code.setFont(CONTROL_FONT_BOLD.deriveFont(16f));
                 code.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
                 code.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -663,13 +816,13 @@ public final class ChessPanel extends PluginPanel
 
                 JButton cancel = dangerButton("Cancel private room");
                 cancel.addActionListener(event -> armDestructiveAction(
-                    cancel,
-                    "Confirm cancel",
-                    () ->
-                    {
-                        multiplayer.leaveMatch();
-                        showFeedback("Private room closed.", false);
-                    }));
+                        cancel,
+                        "Confirm cancel",
+                        () ->
+                        {
+                            multiplayer.leaveMatch();
+                            showFeedback("Private room closed.", false);
+                        }));
                 body.add(fullWidth(cancel));
                 break;
 
@@ -678,8 +831,8 @@ public final class ChessPanel extends PluginPanel
                 body.add(Box.createRigidArea(new Dimension(0, 5)));
 
                 JLabel joiningCode = new JLabel(
-                    ChessMultiplayerService.formatCode(multiplayer.getInvitationCode()),
-                    SwingConstants.CENTER);
+                        ChessMultiplayerService.formatCode(multiplayer.getInvitationCode()),
+                        SwingConstants.CENTER);
                 joiningCode.setForeground(ACCENT_HOVER);
                 joiningCode.setFont(CONTROL_FONT_BOLD.deriveFont(15f));
                 joiningCode.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -694,13 +847,13 @@ public final class ChessPanel extends PluginPanel
 
                 JButton cancelJoin = dangerButton("Cancel connection");
                 cancelJoin.addActionListener(event -> armDestructiveAction(
-                    cancelJoin,
-                    "Confirm cancel",
-                    () ->
-                    {
-                        multiplayer.leaveMatch();
-                        showFeedback("Private connection cancelled.", false);
-                    }));
+                        cancelJoin,
+                        "Confirm cancel",
+                        () ->
+                        {
+                            multiplayer.leaveMatch();
+                            showFeedback("Private connection cancelled.", false);
+                        }));
                 body.add(fullWidth(cancelJoin));
                 break;
 
@@ -712,16 +865,16 @@ public final class ChessPanel extends PluginPanel
                     body.add(Box.createRigidArea(new Dimension(0, 5)));
 
                     JLabel connected = new JLabel(multiplayer.isOpponentConnected()
-                        ? "Your friend is connected."
-                        : "Friend disconnected — waiting for reconnect.");
+                            ? "Your friend is connected."
+                            : "Friend disconnected — waiting for reconnect.");
                     connected.setForeground(multiplayer.isOpponentConnected() ? SUCCESS : WARNING);
                     connected.setFont(CONTROL_FONT_SMALL);
                     body.add(connected);
                     body.add(Box.createRigidArea(new Dimension(0, 7)));
 
                     JButton showBoard = primaryButton(boardOverlay.isVisible()
-                        ? "Board is open in game"
-                        : "Show board in game");
+                            ? "Board is open in game"
+                            : "Show board in game");
                     showBoard.setEnabled(!boardOverlay.isVisible());
                     showBoard.addActionListener(event ->
                     {
@@ -739,13 +892,13 @@ public final class ChessPanel extends PluginPanel
 
                     JButton leave = dangerButton("Leave private match");
                     leave.addActionListener(event -> armDestructiveAction(
-                        leave,
-                        "Confirm leave",
-                        () ->
-                        {
-                            multiplayer.leaveMatch();
-                            showFeedback("Left the private match.", false);
-                        }));
+                            leave,
+                            "Confirm leave",
+                            () ->
+                            {
+                                multiplayer.leaveMatch();
+                                showFeedback("Left the private match.", false);
+                            }));
                     body.add(fullWidth(leave));
                 }
                 break;
@@ -816,7 +969,7 @@ public final class ChessPanel extends PluginPanel
         {
             String formatted = ChessMultiplayerService.formatCode(code);
             Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
-                new StringSelection(formatted), null);
+                    new StringSelection(formatted), null);
             showFeedback("Invite code copied.", false);
         }
         catch (RuntimeException ex)
@@ -825,7 +978,7 @@ public final class ChessPanel extends PluginPanel
         }
     }
 
-    
+
     private JPanel drawerHeader(String titleText, String subtitleText)
     {
         JPanel panel = new JPanel();
@@ -934,16 +1087,16 @@ public final class ChessPanel extends PluginPanel
         multiplayer.startBotGame(difficulty, humanColor, minutes, increment);
         applyBoardOrientation(humanColor == ChessColor.BLACK);
         showFeedback("Playing " + difficulty.getDisplayName() + " as "
-            + humanColor.displayName() + ".", false);
+                + humanColor.displayName() + ".", false);
         refreshUi();
     }
 
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     private void armDestructiveAction(JButton button, String confirmationText, Runnable action)
     {
         if (armedButton == button)
@@ -993,8 +1146,8 @@ public final class ChessPanel extends PluginPanel
             return "No bot draws";
         }
         ChessColor actor = multiplayer.isPlayingOnline()
-            ? multiplayer.getLocalColor()
-            : controller.getGame().getSideToMove();
+                ? multiplayer.getLocalColor()
+                : controller.getGame().getSideToMove();
         ChessColor offeredBy = controller.getDrawOfferedBy();
         if (offeredBy == null)
         {
@@ -1038,18 +1191,18 @@ public final class ChessPanel extends PluginPanel
     private String drawerStateKey()
     {
         return String.valueOf(openDrawer)
-            + '|' + multiplayer.getMode()
-            + '|' + multiplayer.getMatchKind()
-            + '|' + multiplayer.getInvitationCode()
-            + '|' + multiplayer.isMatchmade()
-            + '|' + controller.getGame().getStatus()
-            + '|' + controller.getDrawOfferedBy()
-            + '|' + multiplayer.isOpponentConnected()
-            + '|' + multiplayer.getRematchRequestedBy()
-            + '|' + multiplayer.getLocalColor()
-            + '|' + botService.isActive()
-            + '|' + botService.isThinking()
-            + '|' + botService.getDifficulty();
+                + '|' + multiplayer.getMode()
+                + '|' + multiplayer.getMatchKind()
+                + '|' + multiplayer.getInvitationCode()
+                + '|' + multiplayer.isMatchmade()
+                + '|' + controller.getGame().getStatus()
+                + '|' + controller.getDrawOfferedBy()
+                + '|' + multiplayer.isOpponentConnected()
+                + '|' + multiplayer.getRematchRequestedBy()
+                + '|' + multiplayer.getLocalColor()
+                + '|' + botService.isActive()
+                + '|' + botService.isThinking()
+                + '|' + botService.getDifficulty();
     }
 
     private void updateBoardPresentation(boolean overlayVisible)
@@ -1103,12 +1256,13 @@ public final class ChessPanel extends PluginPanel
 
     private void refreshUi()
     {
+        refreshLobby();
         refreshClockRows();
         String notice = botService.isActive() && botService.isThinking()
-            ? botService.getDifficulty().getDisplayName() + " is thinking…"
-            : controller.getNotice();
+                ? botService.getDifficulty().getDisplayName() + " is thinking…"
+                : controller.getNotice();
         statusText.setText("<html><div style='text-align:center;'>"
-            + escapeHtml(notice) + "</div></html>");
+                + escapeHtml(notice) + "</div></html>");
 
         boolean local = multiplayer.getMode() == ChessMultiplayerService.Mode.LOCAL;
         int minutes;
@@ -1127,15 +1281,15 @@ public final class ChessPanel extends PluginPanel
 
         if (local)
         {
-            modeBadge.setText(botService.isActive() ? "BOT" : "LOCAL");
+            modeBadge.setText(matchmaking.isSearching() ? "QUEUE" : botService.isActive() ? "BOT" : "LOCAL");
             modeBadge.setForeground(botService.isActive() ? ACCENT : MUTED_TEXT);
             sessionCard.setVisible(false);
         }
         else
         {
             modeBadge.setText(multiplayer.isMatchmade()
-                ? "MATCH"
-                : (multiplayer.isPlayingOnline() ? "ONLINE" : "ROOM"));
+                    ? "MATCH"
+                    : (multiplayer.isPlayingOnline() ? "ONLINE" : "ROOM"));
             modeBadge.setForeground(multiplayer.isOpponentConnected() ? SUCCESS : WARNING);
             sessionCard.setVisible(true);
             updateSessionCard();
@@ -1169,10 +1323,10 @@ public final class ChessPanel extends PluginPanel
     private static String clockText(ChessColor color, ChessClock clock)
     {
         return color.displayName() + "  "
-            + ChessClock.format(clock.getRemainingMillis(color));
+                + ChessClock.format(clock.getRemainingMillis(color));
     }
 
-    
+
     private void updateSessionCard()
     {
         if (multiplayer.isMatchmade())
@@ -1188,11 +1342,11 @@ public final class ChessPanel extends PluginPanel
                 case HOST_PLAYING:
                 case GUEST_PLAYING:
                     sessionTitle.setText(multiplayer.getLocalColor() == null
-                        ? "Quick match"
-                        : "Playing as " + multiplayer.getLocalColor().displayName());
+                            ? "Quick match"
+                            : "Playing as " + multiplayer.getLocalColor().displayName());
                     sessionDetail.setText(multiplayer.isOpponentConnected()
-                        ? "Unrated opponent connected"
-                        : "Opponent disconnected — reconnecting");
+                            ? "Unrated opponent connected"
+                            : "Opponent disconnected — reconnecting");
                     connectionDot.setForeground(multiplayer.isOpponentConnected() ? SUCCESS : DANGER);
                     return;
                 default:
@@ -1215,11 +1369,11 @@ public final class ChessPanel extends PluginPanel
             case HOST_PLAYING:
             case GUEST_PLAYING:
                 sessionTitle.setText(multiplayer.getLocalColor() == null
-                    ? "Private match"
-                    : "Playing as " + multiplayer.getLocalColor().displayName());
+                        ? "Private match"
+                        : "Playing as " + multiplayer.getLocalColor().displayName());
                 sessionDetail.setText(multiplayer.isOpponentConnected()
-                    ? "Opponent connected"
-                    : "Opponent disconnected — reconnecting");
+                        ? "Opponent connected"
+                        : "Opponent disconnected — reconnecting");
                 connectionDot.setForeground(multiplayer.isOpponentConnected() ? SUCCESS : DANGER);
                 break;
             default:
@@ -1235,8 +1389,8 @@ public final class ChessPanel extends PluginPanel
         label.setBackground(new Color(47, 47, 47));
         label.setForeground(Color.WHITE);
         label.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(69, 69, 69)),
-            BorderFactory.createEmptyBorder(5, 4, 5, 4)));
+                BorderFactory.createLineBorder(new Color(69, 69, 69)),
+                BorderFactory.createEmptyBorder(5, 4, 5, 4)));
         label.setFont(label.getFont().deriveFont(Font.BOLD, 15f));
         label.setMaximumSize(new Dimension(Integer.MAX_VALUE, 31));
         label.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -1248,8 +1402,8 @@ public final class ChessPanel extends PluginPanel
         label.setBackground(new Color(49, 49, 49));
         label.setForeground(MUTED_TEXT);
         label.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(74, 74, 74)),
-            BorderFactory.createEmptyBorder(2, 7, 2, 7)));
+                BorderFactory.createLineBorder(new Color(74, 74, 74)),
+                BorderFactory.createEmptyBorder(2, 7, 2, 7)));
         label.setFont(CONTROL_FONT_BOLD.deriveFont(10f));
         label.setAlignmentX(Component.RIGHT_ALIGNMENT);
     }
@@ -1259,14 +1413,6 @@ public final class ChessPanel extends PluginPanel
         JButton button = baseButton(text);
         button.setBackground(ACCENT);
         button.setForeground(Color.BLACK);
-        button.addChangeListener(event ->
-        {
-            if (!button.isEnabled())
-            {
-                return;
-            }
-            button.setBackground(button.getModel().isRollover() ? ACCENT_HOVER : ACCENT);
-        });
         return button;
     }
 
@@ -1275,16 +1421,6 @@ public final class ChessPanel extends PluginPanel
         JButton button = baseButton(text);
         button.setBackground(new Color(66, 66, 66));
         button.setForeground(Color.WHITE);
-        button.addChangeListener(event ->
-        {
-            if (!button.isEnabled())
-            {
-                return;
-            }
-            button.setBackground(button.getModel().isRollover()
-                ? new Color(82, 82, 82)
-                : new Color(66, 66, 66));
-        });
         return button;
     }
 
@@ -1306,9 +1442,10 @@ public final class ChessPanel extends PluginPanel
         JButton button = new JButton(text);
         button.setUI(new ReadableButtonUI());
         button.setFocusPainted(false);
+        button.setRolloverEnabled(false);
         button.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(33, 33, 33)),
-            BorderFactory.createEmptyBorder(5, 7, 5, 7)));
+                BorderFactory.createLineBorder(new Color(33, 33, 33)),
+                BorderFactory.createEmptyBorder(5, 7, 5, 7)));
         button.setFont(CONTROL_FONT_BOLD);
         button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
@@ -1326,16 +1463,32 @@ public final class ChessPanel extends PluginPanel
             try
             {
                 g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
-                    RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                        RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
                 g.setFont(button.getFont());
-                g.setColor(button.isEnabled() ? button.getForeground() : DISABLED_BUTTON_TEXT);
+
+                g.setColor(button.isEnabled() ? button.getForeground()
+                        : ACCENT.equals(button.getBackground()) ? Color.BLACK : DISABLED_BUTTON_TEXT);
                 FontMetrics metrics = g.getFontMetrics();
+                if (button.getText().indexOf('\n') >= 0)
+                {
+
+                    String[] lines = button.getText().split("\n");
+                    int y = (button.getHeight() - lines.length * metrics.getHeight()) / 2
+                            + metrics.getAscent();
+                    for (String line : lines)
+                    {
+                        int x = (button.getWidth() - metrics.stringWidth(line)) / 2;
+                        g.drawString(line, x, y);
+                        y += metrics.getHeight();
+                    }
+                    return;
+                }
                 BasicGraphicsUtils.drawStringUnderlineCharAt(
-                    g,
-                    text,
-                    button.getDisplayedMnemonicIndex(),
-                    textRect.x,
-                    textRect.y + metrics.getAscent());
+                        g,
+                        text,
+                        button.getDisplayedMnemonicIndex(),
+                        textRect.x,
+                        textRect.y + metrics.getAscent());
             }
             finally
             {
@@ -1383,8 +1536,8 @@ public final class ChessPanel extends PluginPanel
             return "";
         }
         return value.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;");
+                .replace("<", "&lt;")
+                .replace(">", "&gt;");
     }
 
     private static final class RoundedPanel extends JPanel

@@ -74,10 +74,10 @@ public final class ChessMatchControlsOverlay extends Overlay implements MouseLis
 
     @Inject
     public ChessMatchControlsOverlay(
-        Client client,
-        ChessMultiplayerService multiplayer,
-        LocalChessController controller,
-        ChessBoardOverlay boardOverlay)
+            Client client,
+            ChessMultiplayerService multiplayer,
+            LocalChessController controller,
+            ChessBoardOverlay boardOverlay)
     {
         this.client = client;
         this.multiplayer = multiplayer;
@@ -156,7 +156,7 @@ public final class ChessMatchControlsOverlay extends Overlay implements MouseLis
     @Override
     public Dimension render(Graphics2D graphics)
     {
-        if (!visible || !multiplayer.isPlayingOnline())
+        if (!visible || !boardOverlay.isVisible() || !multiplayer.isPlayingOnline())
         {
             return null;
         }
@@ -215,14 +215,14 @@ public final class ChessMatchControlsOverlay extends Overlay implements MouseLis
         firstButton.setBounds(PADDING, y, buttonWidth, BUTTON_HEIGHT);
         secondButton.setBounds(PADDING + buttonWidth + BUTTON_GAP, y, buttonWidth, BUTTON_HEIGHT);
         thirdButton.setBounds(PADDING + (buttonWidth + BUTTON_GAP) * 2, y,
-            available - buttonWidth * 2 - BUTTON_GAP * 2, BUTTON_HEIGHT);
+                available - buttonWidth * 2 - BUTTON_GAP * 2, BUTTON_HEIGHT);
 
         boolean canAct = multiplayer.canLocalPlayerAct();
         drawButton(g, firstButton, drawActionText(), 1, canAct, false, false);
         drawButton(g, secondButton, pendingAction == PendingAction.RESIGN ? "Confirm" : "Resign",
-            2, canAct, false, true);
+                2, canAct, false, true);
         drawButton(g, thirdButton, pendingAction == PendingAction.LEAVE ? "Confirm" : "Leave",
-            3, true, false, true);
+                3, true, false, true);
     }
 
     private void drawFinishedButtons(Graphics2D g, int y)
@@ -231,24 +231,24 @@ public final class ChessMatchControlsOverlay extends Overlay implements MouseLis
         int buttonWidth = (available - BUTTON_GAP) / 2;
         firstButton.setBounds(PADDING, y, buttonWidth, BUTTON_HEIGHT);
         secondButton.setBounds(PADDING + buttonWidth + BUTTON_GAP, y,
-            available - buttonWidth - BUTTON_GAP, BUTTON_HEIGHT);
+                available - buttonWidth - BUTTON_GAP, BUTTON_HEIGHT);
         thirdButton.setBounds(0, 0, 0, 0);
 
         boolean rematchEnabled = multiplayer.isOpponentConnected()
-            && !multiplayer.isRematchRequestedByLocalPlayer();
+                && !multiplayer.isRematchRequestedByLocalPlayer();
         drawButton(g, firstButton, rematchText(), 1, rematchEnabled, true, false);
         drawButton(g, secondButton, pendingAction == PendingAction.LEAVE ? "Confirm leave" : "Leave match",
-            2, true, false, true);
+                2, true, false, true);
     }
 
     private void drawButton(
-        Graphics2D g,
-        Rectangle bounds,
-        String text,
-        int index,
-        boolean enabled,
-        boolean primary,
-        boolean danger)
+            Graphics2D g,
+            Rectangle bounds,
+            String text,
+            int index,
+            boolean enabled,
+            boolean primary,
+            boolean danger)
     {
         Color base;
         Color hover;
@@ -496,7 +496,8 @@ public final class ChessMatchControlsOverlay extends Overlay implements MouseLis
 
     private boolean isInside(MouseEvent event)
     {
-        return visible && multiplayer.isPlayingOnline() && getBounds().contains(event.getPoint());
+        return visible && boardOverlay.isVisible()
+                && multiplayer.isPlayingOnline() && getBounds().contains(event.getPoint());
     }
 
     private static void drawCentered(Graphics2D g, String text, int x, int y, int width, int height)
@@ -508,12 +509,12 @@ public final class ChessMatchControlsOverlay extends Overlay implements MouseLis
     }
 
     private static void drawCenteredEllipsized(
-        Graphics2D g,
-        String text,
-        int x,
-        int y,
-        int width,
-        int height)
+            Graphics2D g,
+            String text,
+            int x,
+            int y,
+            int width,
+            int height)
     {
         FontMetrics metrics = g.getFontMetrics();
         String value = text == null ? "" : text;

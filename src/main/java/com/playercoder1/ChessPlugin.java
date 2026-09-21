@@ -29,9 +29,9 @@ import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.ImageUtil;
 
 @PluginDescriptor(
-    name = "Chess",
-    description = "Play local, computer, or Varrock Chess Club multiplayer chess",
-    tags = {"chess", "board", "computer", "sidebar", "overlay", "multiplayer", "matchmaking", "party", "varrock"}
+        name = "Chess",
+        description = "Play local, computer, or online chess from the sidebar or Varrock Chess Club",
+        tags = {"chess", "board", "computer", "sidebar", "overlay", "multiplayer", "matchmaking", "party", "varrock"}
 )
 public class ChessPlugin extends Plugin implements ChessMultiplayerService.Listener
 {
@@ -85,6 +85,7 @@ public class ChessPlugin extends Plugin implements ChessMultiplayerService.Liste
 
     private NavigationButton navigationButton;
     private ChessColor lastAutoOrientedColor;
+    private boolean pendingTableMatch;
 
     @Override
     protected void startUp()
@@ -108,11 +109,11 @@ public class ChessPlugin extends Plugin implements ChessMultiplayerService.Liste
 
         BufferedImage icon = ImageUtil.loadImageResource(getClass(), "/chess_icon.png");
         navigationButton = NavigationButton.builder()
-            .tooltip("Chess")
-            .icon(icon)
-            .priority(7)
-            .panel(panel)
-            .build();
+                .tooltip("Chess")
+                .icon(icon)
+                .priority(7)
+                .panel(panel)
+                .build();
 
         SwingUtilities.invokeLater(() ->
         {
@@ -125,47 +126,52 @@ public class ChessPlugin extends Plugin implements ChessMultiplayerService.Liste
     public void onMenuEntryAdded(MenuEntryAdded event)
     {
         if (event.getType() != MenuAction.EXAMINE_OBJECT.getId()
-            || event.getIdentifier() != VARROCK_CHESS_TABLE_OBJECT_ID)
+                || event.getIdentifier() != VARROCK_CHESS_TABLE_OBJECT_ID)
         {
             return;
         }
 
 
         client.createMenuEntry(-1)
-            .setOption(PRIVATE_MATCH)
-            .setTarget(event.getTarget())
-            .setType(MenuAction.RUNELITE)
-            .setIdentifier(event.getIdentifier())
-            .setParam0(event.getActionParam0())
-            .setParam1(event.getActionParam1())
-            .setWorldViewId(event.getMenuEntry().getWorldViewId())
-            .onClick(entry -> openPrivateMatchFromTable());
+                .setOption(PRIVATE_MATCH)
+                .setTarget(event.getTarget())
+                .setType(MenuAction.RUNELITE)
+                .setIdentifier(event.getIdentifier())
+                .setParam0(event.getActionParam0())
+                .setParam1(event.getActionParam1())
+                .setWorldViewId(event.getMenuEntry().getWorldViewId())
+                .onClick(entry -> openPrivateMatchFromTable());
 
         client.createMenuEntry(-1)
-            .setOption(FIND_OPPONENT)
-            .setTarget(event.getTarget())
-            .setType(MenuAction.RUNELITE)
-            .setIdentifier(event.getIdentifier())
-            .setParam0(event.getActionParam0())
-            .setParam1(event.getActionParam1())
-            .setWorldViewId(event.getMenuEntry().getWorldViewId())
-            .onClick(entry -> openLobbyFromTable());
+                .setOption(FIND_OPPONENT)
+                .setTarget(event.getTarget())
+                .setType(MenuAction.RUNELITE)
+                .setIdentifier(event.getIdentifier())
+                .setParam0(event.getActionParam0())
+                .setParam1(event.getActionParam1())
+                .setWorldViewId(event.getMenuEntry().getWorldViewId())
+                .onClick(entry -> openLobbyFromTable());
 
         client.createMenuEntry(-1)
-            .setOption(PLAY_CHESS)
-            .setTarget(event.getTarget())
-            .setType(MenuAction.RUNELITE)
-            .setIdentifier(event.getIdentifier())
-            .setParam0(event.getActionParam0())
-            .setParam1(event.getActionParam1())
-            .setWorldViewId(event.getMenuEntry().getWorldViewId())
-            .onClick(entry -> openChessFromTable());
+                .setOption(PLAY_CHESS)
+                .setTarget(event.getTarget())
+                .setType(MenuAction.RUNELITE)
+                .setIdentifier(event.getIdentifier())
+                .setParam0(event.getActionParam0())
+                .setParam1(event.getActionParam1())
+                .setWorldViewId(event.getMenuEntry().getWorldViewId())
+                .onClick(entry -> openChessFromTable());
     }
 
     private void openChessFromTable()
     {
         if (multiplayerService.isPlayingOnline())
         {
+            SwingUtilities.invokeLater(() ->
+            {
+                boardOverlay.setVisible(true);
+                boardOverlay.fitToCanvasIfNeeded();
+            });
             onSessionChanged();
             return;
         }
@@ -186,6 +192,11 @@ public class ChessPlugin extends Plugin implements ChessMultiplayerService.Liste
     {
         if (multiplayerService.isPlayingOnline())
         {
+            SwingUtilities.invokeLater(() ->
+            {
+                boardOverlay.setVisible(true);
+                boardOverlay.fitToCanvasIfNeeded();
+            });
             onSessionChanged();
             return;
         }
@@ -232,13 +243,23 @@ public class ChessPlugin extends Plugin implements ChessMultiplayerService.Liste
     {
         Runnable sync = () ->
         {
+            if (multiplayerService.isOnline() && !multiplayerService.isPlayingOnline())
+            {
+                pendingTableMatch |= lobbyOverlay.isOpen() || clubOverlay.isOpen();
+            }
             if (multiplayerService.isPlayingOnline())
             {
 
+
+                boolean openedFromTable = pendingTableMatch || lobbyOverlay.isOpen() || clubOverlay.isOpen();
+                pendingTableMatch = false;
                 lobbyOverlay.close();
                 clubOverlay.close();
-                boardOverlay.setVisible(true);
-                boardOverlay.fitToCanvasIfNeeded();
+                if (openedFromTable)
+                {
+                    boardOverlay.setVisible(true);
+                    boardOverlay.fitToCanvasIfNeeded();
+                }
                 matchControlsOverlay.showForMatch();
 
                 ChessColor localColor = multiplayerService.getLocalColor();
@@ -254,6 +275,7 @@ public class ChessPlugin extends Plugin implements ChessMultiplayerService.Liste
             if (!multiplayerService.isOnline())
             {
                 lastAutoOrientedColor = null;
+                pendingTableMatch = false;
             }
         };
 

@@ -48,17 +48,17 @@ public final class ChessMatchmakingService
 
 
     private static final int[][] QUICK_QUEUES =
-    {
-        {1, 0},
-        {3, 0},
-        {3, 2},
-        {5, 0},
-        {5, 3},
-        {10, 0},
-        {10, 3},
-        {10, 5},
-        {15, 10}
-    };
+            {
+                    {1, 0},
+                    {3, 0},
+                    {3, 2},
+                    {5, 0},
+                    {5, 3},
+                    {10, 0},
+                    {10, 3},
+                    {10, 5},
+                    {15, 10}
+            };
 
     private final PartyService partyService;
     private final EventBus eventBus;
@@ -96,10 +96,10 @@ public final class ChessMatchmakingService
 
     @Inject
     public ChessMatchmakingService(
-        PartyService partyService,
-        EventBus eventBus,
-        ChessMultiplayerService multiplayer,
-        ChessBotService botService)
+            PartyService partyService,
+            EventBus eventBus,
+            ChessMultiplayerService multiplayer,
+            ChessBotService botService)
     {
         this.partyService = partyService;
         this.eventBus = eventBus;
@@ -136,6 +136,11 @@ public final class ChessMatchmakingService
     public boolean isLobbyOpen()
     {
         return state != State.IDLE;
+    }
+
+    public boolean isLobbyReady()
+    {
+        return isLobbyOpen() && isInLobbyParty() && localMemberId() != 0L;
     }
 
     public boolean isBrowsing()
@@ -196,8 +201,8 @@ public final class ChessMatchmakingService
         for (QueuePeer peer : peers.values())
         {
             if (peer.lastSeenMillis >= cutoff
-                && peer.initialMinutes == minutes
-                && peer.incrementSeconds == increment)
+                    && peer.initialMinutes == minutes
+                    && peer.incrementSeconds == increment)
             {
                 count++;
             }
@@ -344,12 +349,12 @@ public final class ChessMatchmakingService
         if (readyingHost)
         {
             if (readySendCount < READY_SEND_COUNT
-                && now - lastReadySentMillis >= READY_REPEAT_MILLIS)
+                    && now - lastReadySentMillis >= READY_REPEAT_MILLIS)
             {
                 sendReady();
             }
             else if (readySendCount >= READY_SEND_COUNT
-                && now - lastReadySentMillis >= READY_REPEAT_MILLIS)
+                    && now - lastReadySentMillis >= READY_REPEAT_MILLIS)
             {
                 beginHostMatch();
             }
@@ -370,7 +375,7 @@ public final class ChessMatchmakingService
         }
 
         if (incomingPeerId != 0L
-            && now - incomingOfferStartedMillis >= OFFER_TIMEOUT_MILLIS)
+                && now - incomingOfferStartedMillis >= OFFER_TIMEOUT_MILLIS)
         {
             resumeSearching("Match connection timed out. Searching again…");
         }
@@ -397,7 +402,7 @@ public final class ChessMatchmakingService
     private void handleUserJoin(UserJoin event)
     {
         if (state == State.IDLE || event == null || !isInLobbyParty()
-            || event.getPartyId() != partyService.getPartyId())
+                || event.getPartyId() != partyService.getPartyId())
         {
             return;
         }
@@ -451,7 +456,7 @@ public final class ChessMatchmakingService
     private void handleLobbyMessage(ChessLobbyMessage message)
     {
         if (state == State.IDLE || message == null || message.kind == null
-            || message.protocolVersion != PROTOCOL_VERSION || !isInLobbyParty())
+                || message.protocolVersion != PROTOCOL_VERSION || !isInLobbyParty())
         {
             return;
         }
@@ -500,21 +505,21 @@ public final class ChessMatchmakingService
     private void handleQueue(ChessLobbyMessage message)
     {
         if (!isUuid(message.queueTicket)
-            || !isQuickQueue(message.initialMinutes, message.incrementSeconds))
+                || !isQuickQueue(message.initialMinutes, message.incrementSeconds))
         {
             return;
         }
 
         peers.put(message.getMemberId(), new QueuePeer(
-            message.getMemberId(),
-            message.queueTicket,
-            message.initialMinutes,
-            message.incrementSeconds,
-            System.currentTimeMillis()));
+                message.getMemberId(),
+                message.queueTicket,
+                message.initialMinutes,
+                message.incrementSeconds,
+                System.currentTimeMillis()));
         notifyListeners();
 
         if (state == State.SEARCHING
-            && matchesSelectedQueue(message))
+                && matchesSelectedQueue(message))
         {
             attemptPairing(System.currentTimeMillis());
         }
@@ -527,21 +532,21 @@ public final class ChessMatchmakingService
             return;
         }
         if (readyingHost
-            || !isUuid(message.queueTicket)
-            || !queueTicketEquals(message.targetQueueTicket)
-            || !isUuid(message.offerToken)
-            || !isValidInternalCode(message.matchCode))
+                || !isUuid(message.queueTicket)
+                || !queueTicketEquals(message.targetQueueTicket)
+                || !isUuid(message.offerToken)
+                || !isValidInternalCode(message.matchCode))
         {
             return;
         }
 
         long sender = message.getMemberId();
         peers.put(sender, new QueuePeer(
-            sender,
-            message.queueTicket,
-            message.initialMinutes,
-            message.incrementSeconds,
-            System.currentTimeMillis()));
+                sender,
+                message.queueTicket,
+                message.initialMinutes,
+                message.incrementSeconds,
+                System.currentTimeMillis()));
 
 
         if (expectedCoordinatorForLocal() != sender)
@@ -550,8 +555,8 @@ public final class ChessMatchmakingService
         }
 
         if (incomingPeerId == sender
-            && message.offerToken.equals(incomingOfferToken)
-            && message.matchCode.equals(incomingMatchCode))
+                && message.offerToken.equals(incomingOfferToken)
+                && message.matchCode.equals(incomingMatchCode))
         {
             sendAccept();
             return;
@@ -571,11 +576,11 @@ public final class ChessMatchmakingService
     private void handleAccept(ChessLobbyMessage message)
     {
         if (state != State.CONNECTING || outgoingPeerId == 0L || readyingHost
-            || message.getMemberId() != outgoingPeerId
-            || !queueTicketEquals(message.targetQueueTicket)
-            || !safeEquals(outgoingPeerTicket, message.queueTicket)
-            || !safeEquals(outgoingOfferToken, message.offerToken)
-            || !safeEquals(outgoingMatchCode, message.matchCode))
+                || message.getMemberId() != outgoingPeerId
+                || !queueTicketEquals(message.targetQueueTicket)
+                || !safeEquals(outgoingPeerTicket, message.queueTicket)
+                || !safeEquals(outgoingOfferToken, message.offerToken)
+                || !safeEquals(outgoingMatchCode, message.matchCode))
         {
             return;
         }
@@ -590,11 +595,11 @@ public final class ChessMatchmakingService
     private void handleReady(ChessLobbyMessage message)
     {
         if (state != State.CONNECTING || incomingPeerId == 0L
-            || message.getMemberId() != incomingPeerId
-            || !queueTicketEquals(message.targetQueueTicket)
-            || !safeEquals(incomingPeerTicket, message.queueTicket)
-            || !safeEquals(incomingOfferToken, message.offerToken)
-            || !safeEquals(incomingMatchCode, message.matchCode))
+                || message.getMemberId() != incomingPeerId
+                || !queueTicketEquals(message.targetQueueTicket)
+                || !safeEquals(incomingPeerTicket, message.queueTicket)
+                || !safeEquals(incomingOfferToken, message.offerToken)
+                || !safeEquals(incomingMatchCode, message.matchCode))
         {
             return;
         }
@@ -683,8 +688,8 @@ public final class ChessMatchmakingService
         for (QueuePeer peer : peers.values())
         {
             if (peer.lastSeenMillis >= cutoff
-                && peer.initialMinutes == initialMinutes
-                && peer.incrementSeconds == incrementSeconds)
+                    && peer.initialMinutes == initialMinutes
+                    && peer.incrementSeconds == incrementSeconds)
             {
                 members.add(peer.memberId);
             }
@@ -709,7 +714,7 @@ public final class ChessMatchmakingService
     private void sendOffer()
     {
         if (outgoingPeerId == 0L || outgoingPeerTicket == null
-            || outgoingOfferToken == null || outgoingMatchCode == null)
+                || outgoingOfferToken == null || outgoingMatchCode == null)
         {
             return;
         }
@@ -726,7 +731,7 @@ public final class ChessMatchmakingService
     private void sendAccept()
     {
         if (incomingPeerId == 0L || incomingPeerTicket == null
-            || incomingOfferToken == null || incomingMatchCode == null)
+                || incomingOfferToken == null || incomingMatchCode == null)
         {
             return;
         }
@@ -958,8 +963,8 @@ public final class ChessMatchmakingService
     private boolean matchesSelectedQueue(ChessLobbyMessage message)
     {
         return isSearching()
-            && message.initialMinutes == initialMinutes
-            && message.incrementSeconds == incrementSeconds;
+                && message.initialMinutes == initialMinutes
+                && message.incrementSeconds == incrementSeconds;
     }
 
     private boolean queueTicketEquals(String value)
@@ -1057,11 +1062,11 @@ public final class ChessMatchmakingService
         private final long lastSeenMillis;
 
         private QueuePeer(
-            long memberId,
-            String queueTicket,
-            int initialMinutes,
-            int incrementSeconds,
-            long lastSeenMillis)
+                long memberId,
+                String queueTicket,
+                int initialMinutes,
+                int incrementSeconds,
+                long lastSeenMillis)
         {
             this.memberId = memberId;
             this.queueTicket = queueTicket;
